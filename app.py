@@ -100,6 +100,7 @@ PAGINAS = {
     "📉 Gráfico":            "grafico",
     "💱 Câmbios":            "cambios",
     "📡 Terminal Financeiro":"terminal_financeiro",
+    "📄 Relatório PDF":      "relatorio_pdf",
 }
 
 with st.sidebar:
@@ -236,3 +237,6 @@ elif pagina == "cambios":
 elif pagina == "terminal_financeiro":
     from pages import terminal_financeiro
     terminal_financeiro.render()
+elif pagina == "relatorio_pdf":
+    from pages import relatorio_pdf
+    relatorio_pdf.render()
