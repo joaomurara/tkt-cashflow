@@ -8,26 +8,30 @@ from datetime import date, timedelta
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import db
+import auth
 
 
 def render():
     st.title("📈 Indicadores")
     st.markdown("KPIs de caixa, recebíveis, obrigações e projeção futura.")
 
+    can_edit = st.session_state.get("can_edit", True)
+
     # ─── SALDOS BANCÁRIOS ─────────────────────────────────────────────────
     st.subheader("💳 Saldos Bancários")
     col_sb1, col_sb2 = st.columns([2, 1])
 
     with col_sb2:
-        with st.expander("➕ Atualizar saldo"):
-            with st.form("form_saldo"):
-                banco = st.text_input("Banco / Conta")
-                saldo = st.number_input("Saldo atual (R$)", step=0.01, format="%.2f")
-                data_saldo = st.date_input("Data do saldo", value=date.today())
-                if st.form_submit_button("💾 Salvar"):
-                    db.salvar_saldo(banco, saldo, str(data_saldo))
-                    st.success("Saldo salvo!")
-                    st.rerun()
+        if can_edit:
+            with st.expander("➕ Atualizar saldo"):
+                with st.form("form_saldo"):
+                    banco = st.text_input("Banco / Conta")
+                    saldo = st.number_input("Saldo atual (R$)", step=0.01, format="%.2f")
+                    data_saldo = st.date_input("Data do saldo", value=date.today())
+                    if st.form_submit_button("💾 Salvar"):
+                        db.salvar_saldo(banco, saldo, str(data_saldo))
+                        st.success("Saldo salvo!")
+                        st.rerun()
 
     saldos = db.listar_saldos_recentes()
     total_bancos = sum(r["saldo"] or 0 for r in saldos)

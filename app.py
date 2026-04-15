@@ -112,8 +112,11 @@ with st.sidebar:
 
     # Usuário logado + logout
     display = auth.get_display_name()
+    role = auth.get_role()
     if display:
-        st.caption(f"👤 {display}")
+        role_label = " 👁️ Visualizador" if role == "viewer" else ""
+        st.caption(f"👤 {display}{role_label}")
+    st.session_state["can_edit"] = auth.can_edit()
     if st.button("🚪 Sair", key="btn_logout"):
         auth.logout()
 
@@ -171,15 +174,16 @@ with st.sidebar:
             )
         )
 
-        if st.button("💾 Salvar configurações", key="btn_salvar_cfg"):
-            db.set_cfg("dt_ini",              str(dt_ini_cfg))
-            db.set_cfg("dt_fim",              str(dt_fim_cfg))
-            db.set_cfg("incluir_alta",        "1" if inc_alta_cfg  else "0")
-            db.set_cfg("incluir_media",       "1" if inc_media_cfg else "0")
-            db.set_cfg("erp_corte_status",    "1" if corte_status  else "0")
-            db.set_cfg("atraso_usar_dt_ini",  "1" if atraso_dt_ini else "0")
-            st.success("Salvo!")
-            st.rerun()
+        if auth.can_edit():
+            if st.button("💾 Salvar configurações", key="btn_salvar_cfg"):
+                db.set_cfg("dt_ini",              str(dt_ini_cfg))
+                db.set_cfg("dt_fim",              str(dt_fim_cfg))
+                db.set_cfg("incluir_alta",        "1" if inc_alta_cfg  else "0")
+                db.set_cfg("incluir_media",       "1" if inc_media_cfg else "0")
+                db.set_cfg("erp_corte_status",    "1" if corte_status  else "0")
+                db.set_cfg("atraso_usar_dt_ini",  "1" if atraso_dt_ini else "0")
+                st.success("Salvo!")
+                st.rerun()
 
         # Expõe para uso nas páginas via session_state
         st.session_state["cfg_dt_ini"]        = str(dt_ini_cfg)

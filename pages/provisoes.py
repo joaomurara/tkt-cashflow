@@ -8,11 +8,14 @@ from datetime import date, datetime
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import db
+import auth
 
 
 def render():
     st.title("📝 Provisões")
     st.markdown("Lançamentos manuais que ainda não constam no ERP — despesas previstas, recebimentos estimados, etc.")
+
+    can_edit = st.session_state.get("can_edit", True)
 
     tab_novo, tab_lista, tab_origem = st.tabs([
         "➕ Novo Lançamento", "📋 Gerenciar", "🗑 Excluir por Origem"
@@ -20,6 +23,10 @@ def render():
 
     # ─── ABA NOVO ──────────────────────────────────────────────────────────
     with tab_novo:
+        if not can_edit:
+            st.info("👁️ Você tem acesso somente leitura. Edições não estão disponíveis.")
+            st.stop()
+
         st.subheader("Novo lançamento")
 
         with st.form("form_provisao", clear_on_submit=True):
@@ -174,28 +181,29 @@ def render():
                             n_lote = st.text_input("Lote", value=r["lote"] or "", key=f"lt_{r['id']}")
                             n_tipo = st.text_input("Tipo", value=r["tipo"] or "PROVISAO", key=f"tp_{r['id']}")
 
-                        col_btn1, col_btn2, _ = st.columns([1, 1, 3])
-                        with col_btn1:
-                            if st.button("💾 Atualizar", key=f"upd_{r['id']}"):
-                                db.atualizar_provisao(r["id"], {
-                                    "operacao":      n_op,
-                                    "codigo":        r.get("codigo") or "",
-                                    "tipo":          n_tipo,
-                                    "lote":          n_lote,
-                                    "razao_social":  n_rz,
-                                    "descricao":     n_desc,
-                                    "vencimento":    str(n_ven),
-                                    "valor":         float(n_val),
-                                    "probabilidade": n_prob,
-                                    "imposto":       r.get("imposto") or "NAO",
-                                })
-                                st.success("Atualizado!")
-                                st.rerun()
-                        with col_btn2:
-                            if st.button("🗑️ Excluir", key=f"del_{r['id']}"):
-                                db.excluir_provisao(r["id"])
-                                st.success("Excluído!")
-                                st.rerun()
+                        if can_edit:
+                            col_btn1, col_btn2, _ = st.columns([1, 1, 3])
+                            with col_btn1:
+                                if st.button("💾 Atualizar", key=f"upd_{r['id']}"):
+                                    db.atualizar_provisao(r["id"], {
+                                        "operacao":      n_op,
+                                        "codigo":        r.get("codigo") or "",
+                                        "tipo":          n_tipo,
+                                        "lote":          n_lote,
+                                        "razao_social":  n_rz,
+                                        "descricao":     n_desc,
+                                        "vencimento":    str(n_ven),
+                                        "valor":         float(n_val),
+                                        "probabilidade": n_prob,
+                                        "imposto":       r.get("imposto") or "NAO",
+                                    })
+                                    st.success("Atualizado!")
+                                    st.rerun()
+                            with col_btn2:
+                                if st.button("🗑️ Excluir", key=f"del_{r['id']}"):
+                                    db.excluir_provisao(r["id"])
+                                    st.success("Excluído!")
+                                    st.rerun()
 
     # ─── ABA EXCLUIR POR ORIGEM ───────────────────────────────────────────────
     with tab_origem:
@@ -248,13 +256,16 @@ def render():
                 f"permanentemente."
             )
 
-            confirmar = st.checkbox(
-                "Confirmo que desejo excluir todos esses lançamentos", key="orig_confirm"
-            )
-            if st.button("🗑 Excluir lançamentos", type="primary",
-                         key="orig_del_btn", disabled=not confirmar):
-                n = db.excluir_provisoes_por_origem(
-                    escolha["tipo"], escolha["codigo"], escolha["razao_social"]
+            if can_edit:
+                confirmar = st.checkbox(
+                    "Confirmo que desejo excluir todos esses lançamentos", key="orig_confirm"
                 )
-                st.success(f"✅ {n} lançamento(s) excluído(s) com sucesso.")
-                st.rerun()
+                if st.button("🗑 Excluir lançamentos", type="primary",
+                             key="orig_del_btn", disabled=not confirmar):
+                    n = db.excluir_provisoes_por_origem(
+                        escolha["tipo"], escolha["codigo"], escolha["razao_social"]
+                    )
+                    st.success(f"✅ {n} lançamento(s) excluído(s) com sucesso.")
+                    st.rerun()
+            else:
+                st.info("👁️ Você tem acesso somente leitura. Exclusões não estão disponíveis.")

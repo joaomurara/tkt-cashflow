@@ -39,8 +39,18 @@ def get_display_name() -> str:
     return st.session_state.get("display_name", "")
 
 
+def get_role() -> str:
+    """Retorna o papel do usuário logado: 'admin' ou 'viewer'."""
+    return st.session_state.get("role", "admin")
+
+
+def can_edit() -> bool:
+    """Retorna True se o usuário pode editar dados (não é viewer)."""
+    return get_role() != "viewer"
+
+
 def logout():
-    for key in ("authenticated", "username", "display_name"):
+    for key in ("authenticated", "username", "display_name", "role"):
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -103,6 +113,7 @@ def require_login():
             st.session_state["authenticated"] = True
             st.session_state["username"] = username
             st.session_state["display_name"] = user.get("name", username)
+            st.session_state["role"] = user.get("role", "admin")
             st.rerun()
         else:
             st.error("Usuário ou senha incorretos. Tente novamente.")

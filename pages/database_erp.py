@@ -33,12 +33,17 @@ def render():
     st.title("📂 DATABASE / ERP")
     st.markdown("Importe os lançamentos do ERP. Contém tanto registros **já realizados** quanto **a realizar** (a pagar e a receber).")
 
+    can_edit = st.session_state.get("can_edit", True)
+
     tab_import, tab_dados, tab_atraso, tab_estatisticas = st.tabs([
         "📥 Importar CSV", "📋 Dados Atuais", "🔴 Em Atraso", "📊 Estatísticas"
     ])
 
     # ─── ABA IMPORTAR ──────────────────────────────────────────────────────
     with tab_import:
+        if not can_edit:
+            st.info("👁️ Você tem acesso somente leitura. Importações não estão disponíveis.")
+
         st.subheader("1. Faça upload do CSV exportado pelo ERP")
 
         col_sep, col_enc = st.columns(2)
@@ -143,7 +148,7 @@ def render():
                     st.success(f"Mapeamento '{nome_mapeamento}' salvo!")
 
             with col_btn2:
-                importar = st.button("📥 Importar dados", type="primary")
+                importar = can_edit and st.button("📥 Importar dados", type="primary")
 
             if importar:
                 # Valida obrigatórios
@@ -259,7 +264,7 @@ def render():
                 f"**Saldo:** `R$ {total_cred + total_deb:,.2f}`"
             )
 
-            if st.button("🗑️ Limpar todos os dados do DATABASE", type="secondary"):
+            if can_edit and st.button("🗑️ Limpar todos os dados do DATABASE", type="secondary"):
                 db.importar_erp([], substituir=True)
                 st.success("Dados removidos.")
                 st.rerun()
@@ -274,7 +279,7 @@ def render():
             datas = sorted({r["vencimento"][:7] for r in total_banco if r.get("vencimento")})
             st.caption(f"Meses disponíveis no banco: {', '.join(datas[:24])}" + (" ..." if len(datas) > 24 else ""))
 
-            if st.button("🗑️ Limpar todos os dados do DATABASE", type="secondary"):
+            if can_edit and st.button("🗑️ Limpar todos os dados do DATABASE", type="secondary"):
                 db.importar_erp([], substituir=True)
                 st.success("Dados removidos.")
                 st.rerun()
@@ -335,11 +340,14 @@ def render():
                 "status":         "Status",
             })
 
+            _disabled_cols = ["id", "Op.", "Razão Social", "Descrição", "Vencimento", "Valor", "Status"]
+            if not can_edit:
+                _disabled_cols += ["Em Atraso?", "Data Prevista"]
             edited = st.data_editor(
                 df_edit,
                 use_container_width=True,
                 hide_index=True,
-                disabled=["id", "Op.", "Razão Social", "Descrição", "Vencimento", "Valor", "Status"],
+                disabled=_disabled_cols,
                 column_config={
                     "id":            st.column_config.NumberColumn("ID", width="small"),
                     "Em Atraso?":    st.column_config.CheckboxColumn(
@@ -354,7 +362,7 @@ def render():
                 key="erp_atraso_editor",
             )
 
-            if st.button("💾 Salvar marcações", type="primary", key="erp_atraso_salvar"):
+            if can_edit and st.button("💾 Salvar marcações", type="primary", key="erp_atraso_salvar"):
                 rows = []
                 for _, row in edited.iterrows():
                     dp = row["Data Prevista"]

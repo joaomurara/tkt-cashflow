@@ -109,6 +109,8 @@ def render():
     st.title("📡 FUP Vendas — Pipedrive")
     st.markdown("Gerencie as projeções de venda sincronizadas com o Pipedrive.")
 
+    can_edit = st.session_state.get("can_edit", True)
+
     tab_sync, tab_diag, tab_config, tab_fluxo = st.tabs([
         "🔄 Sincronizar", "🔍 Diagnóstico", "⚙️ Configurar Negócios", "📋 Fluxo Gerado"
     ])
@@ -125,7 +127,7 @@ def render():
         5. Gera as linhas de fluxo de caixa com base nas configurações de cada negócio
         """)
 
-        if st.button("🔄 Sincronizar agora", type="primary"):
+        if can_edit and st.button("🔄 Sincronizar agora", type="primary"):
             log_msgs = []
 
             def log_fn(msg):
@@ -288,7 +290,7 @@ def render():
                         "Nome da etiqueta", value=pc.ETIQUETA_OBRIGATORIA
                     )
 
-                    if st.form_submit_button("💾 Salvar e aplicar filtros"):
+                    if can_edit and st.form_submit_button("💾 Salvar e aplicar filtros"):
                         _atualizar_filtros_pipedrive(
                             estagios_nac, estagios_exp, int(nova_etiq_id), novo_nome_etiq
                         )
@@ -457,7 +459,7 @@ def render():
 
                 obs = st.text_area("Observações", value=cfg.get("obs") or "", key=f"obs_{did}")
 
-                if st.button(f"💾 Salvar configuração", key=f"save_{did}"):
+                if can_edit and st.button(f"💾 Salvar configuração", key=f"save_{did}"):
                     # Parcelas livres (Tipo 4)
                     sk_parc = f"_parc_parc_{did}"
                     parc_salvar = st.session_state.get(sk_parc, [])
@@ -570,7 +572,7 @@ def render():
                                  "além de serem copiadas para Provisões."
                         )
                     with col_btn1:
-                        if st.button(
+                        if can_edit and st.button(
                             "📋 → Mover para Provisões",
                             key=f"mover_{did}",
                             type="primary",
