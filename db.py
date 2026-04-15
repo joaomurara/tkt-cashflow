@@ -227,6 +227,10 @@ def _migrar_db(cur):
     cur.execute(
         "ALTER TABLE cambios_disponiveis ADD COLUMN IF NOT EXISTS origem_snapshot TEXT DEFAULT NULL"
     )
+    # Tipo de conta bancária: Conta Corrente, Aplicação, Câmbio
+    cur.execute(
+        "ALTER TABLE saldos_bancarios ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'Conta Corrente'"
+    )
 
 
 
@@ -626,22 +630,25 @@ def obter_config_deal(deal_id: str):
 
 # ─── SALDOS BANCÁRIOS ────────────────────────────────────────────────────────
 
-def salvar_saldo(banco: str, saldo: float, data: str):
+TIPOS_CONTA = ["Conta Corrente", "Aplicação", "Câmbio"]
+
+
+def salvar_saldo(banco: str, saldo: float, data: str, tipo: str = "Conta Corrente"):
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO saldos_bancarios (banco, saldo, data) VALUES (%s, %s, %s)
-        """, (banco, saldo, data))
+            INSERT INTO saldos_bancarios (banco, saldo, data, tipo) VALUES (%s, %s, %s, %s)
+        """, (banco, saldo, data, tipo))
 
 
-def atualizar_saldo(id: int, banco: str, saldo: float, data: str):
+def atualizar_saldo(id: int, banco: str, saldo: float, data: str, tipo: str = "Conta Corrente"):
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute("""
             UPDATE saldos_bancarios
-               SET banco = %s, saldo = %s, data = %s, atualizado_em = NOW()::TEXT
+               SET banco = %s, saldo = %s, data = %s, tipo = %s, atualizado_em = NOW()::TEXT
              WHERE id = %s
-        """, (banco, saldo, data, id))
+        """, (banco, saldo, data, tipo, id))
 
 
 def excluir_saldo(id: int):

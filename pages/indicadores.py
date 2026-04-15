@@ -79,8 +79,9 @@ def render():
     if saldos:
         cols_banco = st.columns(min(len(saldos), 4))
         for i, r in enumerate(saldos):
+            tipo_label = r.get("tipo") or "Conta Corrente"
             cols_banco[i % 4].metric(
-                r["banco"],
+                f"{r['banco']} · {tipo_label}",
                 f"R$ {r['saldo']:,.2f}",
                 f"em {r['data']}"
             )
@@ -119,18 +120,20 @@ def render():
 
             with tab_novo_s:
                 with st.form("form_saldo_novo", clear_on_submit=True):
-                    col_a, col_b, col_c = st.columns(3)
+                    col_a, col_b, col_c, col_d = st.columns(4)
                     with col_a:
                         banco_novo = st.text_input("Banco / Conta")
                     with col_b:
                         saldo_novo = st.number_input("Saldo (R$)", step=0.01, format="%.2f")
                     with col_c:
                         data_novo = st.date_input("Data", value=date.today())
+                    with col_d:
+                        tipo_novo = st.selectbox("Tipo", db.TIPOS_CONTA)
                     if st.form_submit_button("💾 Salvar"):
                         if not banco_novo:
                             st.error("Informe o nome do banco/conta.")
                         else:
-                            db.salvar_saldo(banco_novo, saldo_novo, str(data_novo))
+                            db.salvar_saldo(banco_novo, saldo_novo, str(data_novo), tipo_novo)
                             st.success(f"Conta '{banco_novo}' salva!")
                             st.rerun()
 
@@ -139,9 +142,10 @@ def render():
                     st.info("Nenhuma conta cadastrada.")
                 else:
                     for r in saldos:
-                        with st.expander(f"🏦 {r['banco']} — R$ {r['saldo']:,.2f}  ·  {r['data']}"):
+                        tipo_r = r.get("tipo") or "Conta Corrente"
+                        with st.expander(f"🏦 {r['banco']} · {tipo_r} — R$ {r['saldo']:,.2f}  ·  {r['data']}"):
                             with st.form(f"form_edit_saldo_{r['id']}"):
-                                col_e1, col_e2, col_e3 = st.columns(3)
+                                col_e1, col_e2, col_e3, col_e4 = st.columns(4)
                                 with col_e1:
                                     banco_e = st.text_input("Banco / Conta", value=r["banco"], key=f"bnc_{r['id']}")
                                 with col_e2:
@@ -153,11 +157,14 @@ def render():
                                     except Exception:
                                         dt_def = date.today()
                                     data_e = st.date_input("Data", value=dt_def, key=f"dt_{r['id']}")
+                                with col_e4:
+                                    tipo_idx = db.TIPOS_CONTA.index(tipo_r) if tipo_r in db.TIPOS_CONTA else 0
+                                    tipo_e = st.selectbox("Tipo", db.TIPOS_CONTA, index=tipo_idx, key=f"tipo_{r['id']}")
 
                                 col_b1, col_b2, _ = st.columns([1, 1, 3])
                                 with col_b1:
                                     if st.form_submit_button("💾 Salvar"):
-                                        db.atualizar_saldo(r["id"], banco_e, saldo_e, str(data_e))
+                                        db.atualizar_saldo(r["id"], banco_e, saldo_e, str(data_e), tipo_e)
                                         st.success("Atualizado!")
                                         st.rerun()
                                 with col_b2:
