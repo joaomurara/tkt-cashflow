@@ -451,12 +451,23 @@ def listar_fup(dt_ini=None, dt_fim=None, prob=None, deal_id=None):
         return [dict(r) for r in cur.fetchall()]
 
 
-def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
+def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True):
+    """
+    Move linhas do FUP para provisões.
+    Retorna (n_movidas, msg_erro) — msg_erro é None em caso de sucesso.
+    """
     linhas = listar_fup(deal_id=str(deal_id))
     if not linhas:
-        return 0
-    with get_conn() as conn:
+        return (0, None)
+
+    conn = None
+    try:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(_get_dsn(), cursor_factory=psycopg2.extras.RealDictCursor)
+        conn.autocommit = False
         cur = conn.cursor()
+
         for l in linhas:
             prov = {
                 "operacao":      l.get("operacao", ""),
@@ -472,9 +483,7 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
                 "probabilidade": l.get("probabilidade", "CONFIRMADO"),
                 "imposto":       l.get("imposto", "NAO"),
             }
-            # Usa savepoint: se INSERT falhar por UniqueViolation (pgcode 23505),
-            # reverte para o savepoint e faz UPDATE no registro conflitante.
-            cur.execute("SAVEPOINT fup_prov_sp")
+            cur.execute("SAVEPOINT sp_fup")
             try:
                 cur.execute("""
                     INSERT INTO provisoes
@@ -485,27 +494,49 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
                        %(descricao)s, %(vencimento)s, %(valor)s, %(valor_final)s,
                        %(semana)s, %(probabilidade)s, %(imposto)s)
                 """, prov)
-            except Exception as _e:
-                cur.execute("ROLLBACK TO SAVEPOINT fup_prov_sp")
-                pgcode = getattr(_e, "pgcode", "") or ""
+                cur.execute("RELEASE SAVEPOINT sp_fup")
+            except Exception as _ie:
+                cur.execute("ROLLBACK TO SAVEPOINT sp_fup")
+                cur.execute("RELEASE SAVEPOINT sp_fup")
+                pgcode = getattr(_ie, "pgcode", None) or ""
                 if pgcode == "23505":
-                    # UniqueViolation — atualiza o registro existente
+                    # UniqueViolation: atualiza o registro conflitante
                     cur.execute("""
                         UPDATE provisoes SET
-                          operacao=%(operacao)s, tipo=%(tipo)s, lote=%(lote)s,
-                          razao_social=%(razao_social)s, valor=%(valor)s,
-                          valor_final=%(valor_final)s, semana=%(semana)s,
-                          probabilidade=%(probabilidade)s, imposto=%(imposto)s,
-                          atualizado_em=NOW()::TEXT
-                        WHERE codigo=%(codigo)s
-                          AND vencimento=%(vencimento)s
-                          AND descricao=%(descricao)s
+                          operacao    = %(operacao)s,
+                          tipo        = %(tipo)s,
+                          lote        = %(lote)s,
+                          razao_social= %(razao_social)s,
+                          valor       = %(valor)s,
+                          valor_final = %(valor_final)s,
+                          semana      = %(semana)s,
+                          probabilidade = %(probabilidade)s,
+                          imposto     = %(imposto)s,
+                          atualizado_em = NOW()::TEXT
+                        WHERE codigo    = %(codigo)s
+                          AND vencimento = %(vencimento)s
+                          AND descricao  = %(descricao)s
                     """, prov)
                 else:
-                    raise
+                    conn.rollback()
+                    conn.close()
+                    return (0, f"[{pgcode}] {_ie}")
+
         if remover_do_fup:
             cur.execute("DELETE FROM fup_vendas WHERE deal_id = %s", (str(deal_id),))
-    return len(linhas)
+
+        conn.commit()
+        conn.close()
+        return (len(linhas), None)
+
+    except Exception as _oe:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+            try: conn.close()
+            except Exception: pass
+        pgcode = getattr(_oe, "pgcode", None) or "?"
+        return (0, f"[{pgcode}] {_oe}")
 
 
 # ─── CONFIG PIPEDRIVE ─────────────────────────────────────────────────────────

@@ -576,27 +576,24 @@ def render():
                             type="primary",
                             help="Copia todas as linhas deste negócio para Provisões"
                         ):
-                            try:
-                                n = db.mover_fup_para_provisoes(
-                                    deal_id=did,
-                                    remover_do_fup=not manter_fup
-                                )
-                                if n:
-                                    st.success(
-                                        f"✅ {n} linha(s) de **{cliente}** movidas para Provisões"
-                                        + (" e removidas do FUP." if not manter_fup else " (mantidas no FUP).")
-                                    )
-                                    st.rerun()
-                                else:
-                                    st.warning("Nenhuma linha encontrada para este negócio.")
-                            except Exception as _err:
-                                import traceback
+                            n, err = db.mover_fup_para_provisoes(
+                                deal_id=did,
+                                remover_do_fup=not manter_fup
+                            )
+                            if err:
                                 st.error(
-                                    f"**Erro ao mover:** `{type(_err).__name__}`\n\n"
-                                    f"**pgcode:** `{getattr(_err, 'pgcode', 'N/A')}`\n\n"
-                                    f"**pgerror:** `{getattr(_err, 'pgerror', str(_err))}`\n\n"
-                                    f"**deal_id:** `{did}`"
+                                    f"**Erro ao mover para Provisões**\n\n"
+                                    f"`{err}`\n\n"
+                                    f"deal_id: `{did}`"
                                 )
+                            elif n:
+                                st.success(
+                                    f"✅ {n} linha(s) de **{cliente}** movidas para Provisões"
+                                    + (" e removidas do FUP." if not manter_fup else " (mantidas no FUP).")
+                                )
+                                st.rerun()
+                            else:
+                                st.warning("Nenhuma linha encontrada para este negócio.")
 
         else:
             # Tabela completa (visão original)
