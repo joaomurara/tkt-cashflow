@@ -19,36 +19,77 @@ def render():
 
     # ─── SALDOS BANCÁRIOS ─────────────────────────────────────────────────
     st.subheader("💳 Saldos Bancários")
-    col_sb1, col_sb2 = st.columns([2, 1])
-
-    with col_sb2:
-        if can_edit:
-            with st.expander("➕ Atualizar saldo"):
-                with st.form("form_saldo"):
-                    banco = st.text_input("Banco / Conta")
-                    saldo = st.number_input("Saldo atual (R$)", step=0.01, format="%.2f")
-                    data_saldo = st.date_input("Data do saldo", value=date.today())
-                    if st.form_submit_button("💾 Salvar"):
-                        db.salvar_saldo(banco, saldo, str(data_saldo))
-                        st.success("Saldo salvo!")
-                        st.rerun()
 
     saldos = db.listar_saldos_recentes()
     total_bancos = sum(r["saldo"] or 0 for r in saldos)
 
-    with col_sb1:
-        if saldos:
-            cols_banco = st.columns(min(len(saldos), 4))
-            for i, r in enumerate(saldos):
-                cols_banco[i % 4].metric(
-                    r["banco"],
-                    f"R$ {r['saldo']:,.2f}",
-                    f"em {r['data']}"
-                )
-        else:
-            st.info("Nenhum saldo cadastrado. Use o painel ao lado para adicionar.")
+    # Métricas resumo
+    if saldos:
+        cols_banco = st.columns(min(len(saldos), 4))
+        for i, r in enumerate(saldos):
+            cols_banco[i % 4].metric(
+                r["banco"],
+                f"R$ {r['saldo']:,.2f}",
+                f"em {r['data']}"
+            )
+    else:
+        st.info("Nenhum saldo cadastrado. Adicione uma conta abaixo.")
 
     st.markdown(f"**Total em caixa:** `R$ {total_bancos:,.2f}`")
+
+    if can_edit:
+        with st.expander("⚙️ Gerenciar contas", expanded=not saldos):
+            tab_novo_s, tab_editar_s = st.tabs(["➕ Nova conta", "✏️ Editar / Excluir"])
+
+            with tab_novo_s:
+                with st.form("form_saldo_novo", clear_on_submit=True):
+                    col_a, col_b, col_c = st.columns(3)
+                    with col_a:
+                        banco_novo = st.text_input("Banco / Conta")
+                    with col_b:
+                        saldo_novo = st.number_input("Saldo (R$)", step=0.01, format="%.2f")
+                    with col_c:
+                        data_novo = st.date_input("Data", value=date.today())
+                    if st.form_submit_button("💾 Salvar"):
+                        if not banco_novo:
+                            st.error("Informe o nome do banco/conta.")
+                        else:
+                            db.salvar_saldo(banco_novo, saldo_novo, str(data_novo))
+                            st.success(f"Conta '{banco_novo}' salva!")
+                            st.rerun()
+
+            with tab_editar_s:
+                if not saldos:
+                    st.info("Nenhuma conta cadastrada.")
+                else:
+                    for r in saldos:
+                        with st.expander(f"🏦 {r['banco']} — R$ {r['saldo']:,.2f}  ·  {r['data']}"):
+                            with st.form(f"form_edit_saldo_{r['id']}"):
+                                col_e1, col_e2, col_e3 = st.columns(3)
+                                with col_e1:
+                                    banco_e = st.text_input("Banco / Conta", value=r["banco"], key=f"bnc_{r['id']}")
+                                with col_e2:
+                                    saldo_e = st.number_input("Saldo (R$)", value=float(r["saldo"] or 0),
+                                                              step=0.01, format="%.2f", key=f"sld_{r['id']}")
+                                with col_e3:
+                                    try:
+                                        dt_def = date.fromisoformat(r["data"])
+                                    except Exception:
+                                        dt_def = date.today()
+                                    data_e = st.date_input("Data", value=dt_def, key=f"dt_{r['id']}")
+
+                                col_b1, col_b2, _ = st.columns([1, 1, 3])
+                                with col_b1:
+                                    if st.form_submit_button("💾 Salvar"):
+                                        db.atualizar_saldo(r["id"], banco_e, saldo_e, str(data_e))
+                                        st.success("Atualizado!")
+                                        st.rerun()
+                                with col_b2:
+                                    if st.form_submit_button("🗑️ Excluir", type="secondary"):
+                                        db.excluir_saldo(r["id"])
+                                        st.success(f"Conta '{r['banco']}' excluída.")
+                                        st.rerun()
+
     st.markdown("---")
 
     hoje = date.today()

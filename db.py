@@ -634,6 +634,22 @@ def salvar_saldo(banco: str, saldo: float, data: str):
         """, (banco, saldo, data))
 
 
+def atualizar_saldo(id: int, banco: str, saldo: float, data: str):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE saldos_bancarios
+               SET banco = %s, saldo = %s, data = %s, atualizado_em = NOW()::TEXT
+             WHERE id = %s
+        """, (banco, saldo, data, id))
+
+
+def excluir_saldo(id: int):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM saldos_bancarios WHERE id = %s", (id,))
+
+
 def listar_saldos_recentes():
     with get_conn() as conn:
         cur = conn.cursor()
