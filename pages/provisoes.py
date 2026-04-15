@@ -14,6 +14,20 @@ def render():
     st.title("📝 Provisões")
     st.markdown("Lançamentos manuais que ainda não constam no ERP — despesas previstas, recebimentos estimados, etc.")
 
+    # ── DIAGNÓSTICO TEMPORÁRIO: constraints únicas da tabela provisoes ─────────
+    with st.expander("🔍 Diagnóstico: constraints da tabela provisoes", expanded=False):
+        try:
+            constraints = db.get_provisoes_constraints()
+            if constraints:
+                st.write("Constraints UNIQUE encontradas:")
+                for c in constraints:
+                    st.code(f"{c['constraint_name']}: {c['columns']}")
+            else:
+                st.info("Nenhuma constraint UNIQUE encontrada além do PRIMARY KEY.")
+        except Exception as e:
+            st.error(f"Erro ao buscar constraints: {e}")
+    # ── FIM DIAGNÓSTICO ────────────────────────────────────────────────────────
+
     tab_novo, tab_lista, tab_origem = st.tabs([
         "➕ Novo Lançamento", "📋 Gerenciar", "🗑 Excluir por Origem"
     ])

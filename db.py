@@ -198,6 +198,24 @@ def _migrar_db(cur):
 
 # ─── CONFIGURAÇÕES GLOBAIS ───────────────────────────────────────────────────
 
+def get_provisoes_constraints() -> list:
+    """Retorna as constraints únicas da tabela provisoes (diagnóstico)."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.conname AS constraint_name,
+                   string_agg(a.attname, ', ' ORDER BY x.n) AS columns
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid = c.conrelid
+            JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS x(attnum, n) ON TRUE
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.attnum
+            WHERE t.relname = 'provisoes'
+              AND c.contype = 'u'
+            GROUP BY c.conname
+        """)
+        return [dict(r) for r in cur.fetchall()]
+
+
 _CFG_DEFAULTS = {
     "dt_ini":           "",
     "dt_fim":           "",
@@ -439,12 +457,6 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
         return 0
     with get_conn() as conn:
         cur = conn.cursor()
-        # Remove provisões já existentes desse deal para evitar UniqueViolation
-        # (caso o usuário mova o mesmo negócio mais de uma vez, os dados são atualizados)
-        cur.execute(
-            "DELETE FROM provisoes WHERE codigo = %s",
-            (str(deal_id),)
-        )
         for l in linhas:
             prov = {
                 "operacao":      l.get("operacao", ""),
@@ -460,15 +472,35 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
                 "probabilidade": l.get("probabilidade", "CONFIRMADO"),
                 "imposto":       l.get("imposto", "NAO"),
             }
-            cur.execute("""
-                INSERT INTO provisoes
-                  (operacao, codigo, tipo, lote, razao_social, descricao,
-                   vencimento, valor, valor_final, semana, probabilidade, imposto)
-                VALUES
-                  (%(operacao)s, %(codigo)s, %(tipo)s, %(lote)s, %(razao_social)s,
-                   %(descricao)s, %(vencimento)s, %(valor)s, %(valor_final)s,
-                   %(semana)s, %(probabilidade)s, %(imposto)s)
-            """, prov)
+            # Usa savepoint para lidar com UniqueViolation sem abortar a transação.
+            # Se o INSERT falhar por constraint, faz UPDATE do registro existente.
+            cur.execute("SAVEPOINT fup_prov_sp")
+            try:
+                cur.execute("""
+                    INSERT INTO provisoes
+                      (operacao, codigo, tipo, lote, razao_social, descricao,
+                       vencimento, valor, valor_final, semana, probabilidade, imposto)
+                    VALUES
+                      (%(operacao)s, %(codigo)s, %(tipo)s, %(lote)s, %(razao_social)s,
+                       %(descricao)s, %(vencimento)s, %(valor)s, %(valor_final)s,
+                       %(semana)s, %(probabilidade)s, %(imposto)s)
+                """, prov)
+                cur.execute("RELEASE SAVEPOINT fup_prov_sp")
+            except psycopg2.errors.UniqueViolation:
+                # Volta ao savepoint e tenta atualizar o registro conflitante
+                cur.execute("ROLLBACK TO SAVEPOINT fup_prov_sp")
+                cur.execute("""
+                    UPDATE provisoes SET
+                      operacao=%(operacao)s, tipo=%(tipo)s, lote=%(lote)s,
+                      razao_social=%(razao_social)s, valor=%(valor)s,
+                      valor_final=%(valor_final)s, semana=%(semana)s,
+                      probabilidade=%(probabilidade)s, imposto=%(imposto)s,
+                      atualizado_em=NOW()::TEXT
+                    WHERE codigo=%(codigo)s
+                      AND vencimento=%(vencimento)s
+                      AND descricao=%(descricao)s
+                """, prov)
+                cur.execute("RELEASE SAVEPOINT fup_prov_sp")
         if remover_do_fup:
             cur.execute("DELETE FROM fup_vendas WHERE deal_id = %s", (str(deal_id),))
     return len(linhas)
