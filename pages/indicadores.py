@@ -5,6 +5,7 @@ Página Indicadores — KPIs e posição de caixa projetada.
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
+from collections import defaultdict
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import requests
