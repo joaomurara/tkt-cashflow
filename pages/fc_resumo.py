@@ -29,15 +29,19 @@ def render():
         st.markdown("### Cenário 1 — ALTA")
         inc_alta_c1  = st.checkbox("Incluir ALTA",  value=True,  key="c1_alta")
         inc_media_c1 = st.checkbox("Incluir MEDIA", value=False, key="c1_media")
+        inc_fci_c1   = st.checkbox("Incluir FCI",   value=True,  key="c1_fci")
+        inc_fcf_c1   = st.checkbox("Incluir FCF",   value=True,  key="c1_fcf")
     with col_c2:
         st.markdown("### Cenário 2 — ALTA + MEDIA")
         inc_alta_c2  = st.checkbox("Incluir ALTA",  value=True,  key="c2_alta")
         inc_media_c2 = st.checkbox("Incluir MEDIA", value=True,  key="c2_media")
+        inc_fci_c2   = st.checkbox("Incluir FCI",   value=True,  key="c2_fci")
+        inc_fcf_c2   = st.checkbox("Incluir FCF",   value=True,  key="c2_fcf")
 
     saldo_inicial = db.get_saldo_total()
 
-    dados_c1 = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta_c1, inc_media_c1, erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial)
-    dados_c2 = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta_c2, inc_media_c2, erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial)
+    dados_c1 = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta_c1, inc_media_c1, erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial, inc_fci=inc_fci_c1, inc_fcf=inc_fcf_c1)
+    dados_c2 = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta_c2, inc_media_c2, erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial, inc_fci=inc_fci_c2, inc_fcf=inc_fcf_c2)
 
     df_c1 = _pivot_mensal(dados_c1, "Cenário 1", saldo_inicial)
     df_c2 = _pivot_mensal(dados_c2, "Cenário 2", saldo_inicial)

@@ -54,11 +54,14 @@ def render():
     col_p1, col_p2, col_p3 = st.columns(3)
     inc_alta  = st.checkbox("Incluir ALTA no cálculo",  value=st.session_state.get("cfg_inc_alta",  True))
     inc_media = st.checkbox("Incluir MEDIA no cálculo", value=st.session_state.get("cfg_inc_media", False))
+    inc_fci   = st.checkbox("Incluir FCI nas Provisões", value=True, key="ind_fci")
+    inc_fcf   = st.checkbox("Incluir FCF nas Provisões", value=True, key="ind_fcf")
     cfg_corte = st.session_state.get("cfg_corte_status", True)
 
     for label, dias in [("30 dias", 30), ("60 dias", 60), ("90 dias", 90)]:
         dt_fim = str(hoje + timedelta(days=dias))
-        dados = db.fc_diario(str(hoje), dt_fim, inc_alta, inc_media, erp_corte_status=cfg_corte)
+        dados = db.fc_diario(str(hoje), dt_fim, inc_alta, inc_media, erp_corte_status=cfg_corte,
+                             inc_fci=inc_fci, inc_fcf=inc_fcf)
         fluxo = sum(r["valor_final"] or 0 for r in dados)
         posicao = total_bancos + fluxo
 
@@ -75,7 +78,8 @@ def render():
     # ─── RECEBÍVEIS E OBRIGAÇÕES ─────────────────────────────────────────
     st.subheader("📋 Recebíveis e Obrigações")
     dt_fim_ano = str(date(hoje.year, 12, 31))
-    dados_all = db.fc_diario(str(hoje), dt_fim_ano, True, False, erp_corte_status=cfg_corte)
+    dados_all = db.fc_diario(str(hoje), dt_fim_ano, True, False, erp_corte_status=cfg_corte,
+                             inc_fci=inc_fci, inc_fcf=inc_fcf)
 
     if dados_all:
         total_recebiveis  = sum(r["valor_final"] for r in dados_all if (r["valor_final"] or 0) > 0)
@@ -108,7 +112,8 @@ def render():
     # ─── PRÓXIMOS VENCIMENTOS ─────────────────────────────────────────────
     st.subheader("🔔 Próximos vencimentos (15 dias)")
     dt_15 = str(hoje + timedelta(days=15))
-    proximos = db.fc_diario(str(hoje), dt_15, True, False, erp_corte_status=cfg_corte)
+    proximos = db.fc_diario(str(hoje), dt_15, True, False, erp_corte_status=cfg_corte,
+                            inc_fci=inc_fci, inc_fcf=inc_fcf)
     if proximos:
         df_prox = pd.DataFrame(proximos)
         df_prox["vencimento"] = pd.to_datetime(df_prox["vencimento"]).dt.strftime("%d/%m/%Y")

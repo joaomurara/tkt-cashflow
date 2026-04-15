@@ -546,7 +546,8 @@ def get_saldo_total() -> float:
 # ─── FC DIÁRIO (VIEW CONSOLIDADA) ────────────────────────────────────────────
 
 def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
-              erp_corte_status=True, saldo_inicial: float = None):
+              erp_corte_status=True, saldo_inicial: float = None,
+              inc_fci=True, inc_fcf=True):
     """
     Consolida DATABASE + Provisões + FUP Vendas em um único fluxo diário.
 
@@ -556,6 +557,10 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
 
     saldo_inicial (float | None):
         Valor de partida para o saldo acumulado. Se None, usa get_saldo_total().
+
+    inc_fci / inc_fcf (bool):
+        Controla se provisões do tipo FCI / FCF entram no cálculo.
+        Quando False, exclui as provisões daquele tipo.
     """
     filtros_prob = ["CONFIRMADO"]
     if incluir_alta:
@@ -569,6 +574,19 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
         cond_dt += " AND vencimento >= %s"; params_dt.append(str(dt_ini))
     if dt_fim:
         cond_dt += " AND vencimento <= %s"; params_dt.append(str(dt_fim))
+
+    # Filtro de tipo para provisões (FCI / FCF)
+    tipos_excluidos = []
+    if not inc_fci:
+        tipos_excluidos.append("FCI")
+    if not inc_fcf:
+        tipos_excluidos.append("FCF")
+    if tipos_excluidos:
+        cond_tipo_prov = " AND (tipo IS NULL OR tipo != ALL(%s))"
+        params_tipo_prov = [tipos_excluidos]
+    else:
+        cond_tipo_prov = ""
+        params_tipo_prov = []
 
     if erp_corte_status and dt_ini:
         sql_erp = f"""
@@ -596,7 +614,7 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
                razao_social, descricao, vencimento, valor, valor_final,
                semana, probabilidade, imposto, '' AS status
         FROM provisoes
-        WHERE probabilidade = ANY(%s) {cond_dt}
+        WHERE probabilidade = ANY(%s) {cond_dt} {cond_tipo_prov}
     """
 
     sql_fup = f"""
@@ -616,7 +634,9 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
             {sql_fup}
         ) AS consolidated ORDER BY vencimento
     """
-    all_params = params_erp + [filtros_prob] + params_dt + [filtros_prob] + params_dt
+    all_params = (params_erp
+                  + [filtros_prob] + params_dt + params_tipo_prov
+                  + [filtros_prob] + params_dt)
 
     with get_conn() as conn:
         cur = conn.cursor()

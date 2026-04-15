@@ -30,10 +30,17 @@ def render():
     with col_f5:
         agrupamento = st.selectbox("Agrupar por", ["Semana", "Mês"], key="g_agrup")
 
+    col_f6, col_f7, col_f8 = st.columns([1, 1, 3])
+    with col_f6:
+        inc_fci = st.toggle("FCI", value=True, key="g_fci")
+    with col_f7:
+        inc_fcf = st.toggle("FCF", value=True, key="g_fcf")
+
     saldo_inicial = db.get_saldo_total()
 
     dados = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta, inc_media,
-                         erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial)
+                         erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial,
+                         inc_fci=inc_fci, inc_fcf=inc_fcf)
 
     if not dados:
         st.info("Nenhum dado para os filtros selecionados.")

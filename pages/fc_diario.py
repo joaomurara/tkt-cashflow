@@ -40,6 +40,12 @@ def render():
     with col_f5:
         op_filtro = st.selectbox("Operação", ["Todas", "CREDITO", "DEBITO"], key="fcd_op")
 
+    col_f6, col_f7, col_f8 = st.columns([1, 1, 3])
+    with col_f6:
+        inc_fci = st.checkbox("Incluir FCI", value=True, key="fcd_fci")
+    with col_f7:
+        inc_fcf = st.checkbox("Incluir FCF", value=True, key="fcd_fcf")
+
     st.caption(
         f"⚙️ ERP: {'excluindo PENDENTES anteriores à data inicial' if cfg_corte else 'incluindo todos os lançamentos'}"
         " — altere em **⚙️ Período de análise** na barra lateral."
@@ -53,6 +59,8 @@ def render():
         incluir_media=incluir_media,
         erp_corte_status=cfg_corte,
         saldo_inicial=saldo_inicial,
+        inc_fci=inc_fci,
+        inc_fcf=inc_fcf,
     )
 
     if op_filtro != "Todas":
