@@ -198,6 +198,10 @@ def _migrar_db(cur):
     cur.execute(
         "ALTER TABLE database_erp ADD COLUMN IF NOT EXISTS incluir_atraso BOOLEAN DEFAULT FALSE"
     )
+    # Data prevista de recebimento/pagamento para itens em atraso
+    cur.execute(
+        "ALTER TABLE database_erp ADD COLUMN IF NOT EXISTS data_previsao TEXT DEFAULT NULL"
+    )
 
 
 
@@ -292,19 +296,24 @@ def listar_erp_pendentes_atraso(dt_corte: str):
         return [dict(r) for r in cur.fetchall()]
 
 
-def atualizar_erp_atraso(ids_true: list[int], ids_false: list[int]):
-    """Atualiza a flag incluir_atraso para os ids fornecidos."""
+def atualizar_erp_atraso(rows: list[dict]):
+    """
+    Atualiza incluir_atraso e data_previsao para cada item.
+    rows: [{"id": int, "incluir_atraso": bool, "data_previsao": str|None}, ...]
+    """
     with get_conn() as conn:
         cur = conn.cursor()
-        if ids_true:
+        for r in rows:
             cur.execute(
-                "UPDATE database_erp SET incluir_atraso = TRUE  WHERE id = ANY(%s)",
-                (ids_true,)
-            )
-        if ids_false:
-            cur.execute(
-                "UPDATE database_erp SET incluir_atraso = FALSE WHERE id = ANY(%s)",
-                (ids_false,)
+                """UPDATE database_erp
+                   SET incluir_atraso = %s,
+                       data_previsao  = %s
+                   WHERE id = %s""",
+                (
+                    bool(r.get("incluir_atraso", False)),
+                    r.get("data_previsao") or None,
+                    int(r["id"]),
+                )
             )
 
 
@@ -678,14 +687,21 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
 
     if erp_corte_status and dt_ini:
         # Itens dentro do range OU itens marcados como atraso real (bypass do lower bound)
+        # Prioridade: data_previsao > atraso_usar_dt_ini > vencimento original
         if atraso_usar_dt_ini:
-            # Atrasos aparecem na data de início do período
-            ven_col = ("CASE WHEN COALESCE(incluir_atraso, FALSE) AND vencimento < %s "
-                       "THEN %s ELSE vencimento END")
+            ven_col = (
+                "CASE WHEN COALESCE(incluir_atraso, FALSE) AND vencimento < %s "
+                "THEN COALESCE(data_previsao, %s) "
+                "ELSE vencimento END"
+            )
             p_ven = [str(dt_ini), str(dt_ini)]
         else:
-            # Atrasos aparecem na data original de vencimento
-            ven_col = "vencimento"
+            # Usa data_previsao se preenchida, senão mantém vencimento original
+            ven_col = (
+                "CASE WHEN COALESCE(incluir_atraso, FALSE) AND data_previsao IS NOT NULL "
+                "THEN data_previsao "
+                "ELSE vencimento END"
+            )
             p_ven = []
 
         cond_fim_erp = f"AND vencimento <= %s" if dt_fim else ""

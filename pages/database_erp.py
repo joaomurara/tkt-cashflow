@@ -311,12 +311,22 @@ def render():
             st.info(f"{len(df_at)} lançamento(s) exibido(s). Marque os que são **atrasos reais**.")
             df_at["incluir_atraso"] = df_at["incluir_atraso"].fillna(False).astype(bool)
 
+            if "data_previsao" not in df_at.columns:
+                df_at["data_previsao"] = None
+
             df_edit = df_at[[
-                "id", "incluir_atraso", "operacao", "razao_social",
+                "id", "incluir_atraso", "data_previsao", "operacao", "razao_social",
                 "descricao", "vencimento", "valor_final", "status"
             ]].copy()
+
+            # Converte data_previsao para date (aceito pelo data_editor)
+            df_edit["data_previsao"] = pd.to_datetime(
+                df_edit["data_previsao"], errors="coerce"
+            ).dt.date
+
             df_edit = df_edit.rename(columns={
                 "incluir_atraso": "Em Atraso?",
+                "data_previsao":  "Data Prevista",
                 "operacao":       "Op.",
                 "razao_social":   "Razão Social",
                 "descricao":      "Descrição",
@@ -331,22 +341,30 @@ def render():
                 hide_index=True,
                 disabled=["id", "Op.", "Razão Social", "Descrição", "Vencimento", "Valor", "Status"],
                 column_config={
-                    "id":          st.column_config.NumberColumn("ID", width="small"),
-                    "Em Atraso?":  st.column_config.CheckboxColumn("Em Atraso?", width="small",
-                                       help="Marque para incluir no fluxo mesmo sendo anterior ao período"),
-                    "Valor":       st.column_config.NumberColumn("Valor", format="R$ %.2f"),
+                    "id":            st.column_config.NumberColumn("ID", width="small"),
+                    "Em Atraso?":    st.column_config.CheckboxColumn(
+                                         "Em Atraso?", width="small",
+                                         help="Marque para incluir no fluxo mesmo sendo anterior ao período"),
+                    "Data Prevista": st.column_config.DateColumn(
+                                         "Data Prevista",
+                                         help="Data em que espera receber/pagar. Deixe vazio para usar a data original de vencimento.",
+                                         format="DD/MM/YYYY"),
+                    "Valor":         st.column_config.NumberColumn("Valor", format="R$ %.2f"),
                 },
                 key="erp_atraso_editor",
             )
 
             if st.button("💾 Salvar marcações", type="primary", key="erp_atraso_salvar"):
-                ids_true  = edited.loc[edited["Em Atraso?"] == True,  "id"].tolist()
-                ids_false = edited.loc[edited["Em Atraso?"] == False, "id"].tolist()
-                db.atualizar_erp_atraso(
-                    [int(i) for i in ids_true],
-                    [int(i) for i in ids_false],
-                )
-                marcados = len(ids_true)
+                rows = []
+                for _, row in edited.iterrows():
+                    dp = row["Data Prevista"]
+                    rows.append({
+                        "id":             row["id"],
+                        "incluir_atraso": bool(row["Em Atraso?"]),
+                        "data_previsao":  str(dp) if pd.notna(dp) and dp else None,
+                    })
+                db.atualizar_erp_atraso(rows)
+                marcados = sum(1 for r in rows if r["incluir_atraso"])
                 st.success(f"✅ {marcados} lançamento(s) marcado(s) como Em Atraso.")
                 st.rerun()
 
