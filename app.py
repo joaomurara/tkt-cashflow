@@ -6,6 +6,7 @@ Ponto de entrada principal do Streamlit
 import streamlit as st
 import sys
 import os
+from PIL import Image
 
 # Garante que o diretório do app está no path para imports relativos
 sys.path.insert(0, os.path.dirname(__file__))
@@ -19,9 +20,12 @@ import auth
 auth.require_login()
 
 # ─── CONFIGURAÇÃO DA PÁGINA ──────────────────────────────────────────────────
+_icon_path = os.path.join(os.path.dirname(__file__), "logo_tecnontok_basico.png")
+_page_icon = Image.open(_icon_path) if os.path.exists(_icon_path) else "💰"
+
 st.set_page_config(
     page_title="TKT Cash Flow",
-    page_icon="💰",
+    page_icon=_page_icon,
     layout="wide",
     initial_sidebar_state="expanded",
 )

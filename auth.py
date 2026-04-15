@@ -5,6 +5,7 @@ Controla login/logout com bcrypt + st.session_state
 
 import streamlit as st
 import bcrypt
+import os
 
 
 # ─── HELPERS ────────────────────────────────────────────────────────────────
@@ -74,13 +75,19 @@ def require_login():
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown(
-        '<div class="login-box">'
-        '<h2 style="color:white;margin-bottom:0">🏭 Tecnotok</h2>'
-        '<h3 style="color:#a8c8e8;margin-top:4px;margin-bottom:1.5rem">TKT Cash Flow</h3>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+    _logo_login = os.path.join(os.path.dirname(__file__), "logo_tecnotok.png")
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        if os.path.exists(_logo_login):
+            st.image(_logo_login, use_container_width=True)
+        else:
+            st.markdown(
+                '<div class="login-box">'
+                '<h2 style="color:white;margin-bottom:0">🏭 Tecnotok</h2>'
+                '<h3 style="color:#a8c8e8;margin-top:4px;margin-bottom:1.5rem">TKT Cash Flow</h3>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
