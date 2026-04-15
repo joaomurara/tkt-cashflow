@@ -173,6 +173,17 @@ def render():
 
                 obs_fech = st.text_input("Observações (opcional)", key="fech_obs")
 
+                # Baixa automática do lançamento vinculado
+                tem_origem = bool(escolha.get("origem_id"))
+                baixar_origem = False
+                if tem_origem:
+                    origem_label = escolha.get("origem", "")
+                    baixa_txt = (
+                        f"Baixar lançamento vinculado ({origem_label} #{escolha['origem_id']}) — "
+                        f"{'marcar como RECEBIDO' if origem_label == 'DATABASE' else 'excluir da PROVISÕES'}"
+                    )
+                    baixar_origem = st.checkbox(baixa_txt, value=True, key="fech_baixar")
+
                 if st.button("✅ Confirmar fechamento", type="primary", key="btn_fechar"):
                     if taxa_ef <= 0:
                         st.error("Informe a taxa efetiva.")
@@ -186,8 +197,14 @@ def render():
                             ptax_fechamento=ptax_ef,
                             observacoes=obs_fech or None,
                         )
-                        st.success(f"✅ Câmbio #{escolha['id']} fechado. Spread: {spread_pct:+.2f}%")
-                        # Limpa cache de PTAX para recarregar
+                        msg = f"✅ Câmbio #{escolha['id']} fechado. Spread: {spread_pct:+.2f}%"
+                        if baixar_origem and tem_origem:
+                            db.marcar_recebivel_recebido(
+                                escolha["origem"], escolha["origem_id"]
+                            )
+                            origem_label = escolha.get("origem", "")
+                            msg += f" | Lançamento {origem_label} #{escolha['origem_id']} baixado."
+                        st.success(msg)
                         for k in list(st.session_state.keys()):
                             if k.startswith("_ptax_"):
                                 del st.session_state[k]

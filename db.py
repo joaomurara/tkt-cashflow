@@ -908,7 +908,11 @@ def buscar_recebiveis_exportacao(termo: str = "") -> list[dict]:
 
 
 def marcar_recebivel_recebido(origem: str, origem_id: int):
-    """Marca o lançamento de origem como RECEBIDO."""
+    """
+    Baixa o lançamento de origem quando o câmbio é fechado.
+    DATABASE  → status = 'RECEBIDO'
+    PROVISOES → exclui o registro (provisões não têm campo status)
+    """
     with get_conn() as conn:
         cur = conn.cursor()
         if origem == "DATABASE":
@@ -917,8 +921,10 @@ def marcar_recebivel_recebido(origem: str, origem_id: int):
                 (origem_id,)
             )
         elif origem == "PROVISOES":
-            # Provisões não têm campo status, mas podemos excluir ou apenas registrar
-            pass  # mantém intacto — usuário pode excluir manualmente se quiser
+            cur.execute(
+                "DELETE FROM provisoes WHERE id = %s",
+                (origem_id,)
+            )
 
 
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
