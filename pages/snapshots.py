@@ -70,7 +70,7 @@ def _capturar_dados(hoje: date, inc_alta: bool, inc_media: bool,
             "itens":           por_data[dt]["itens"],
         })
 
-    # Posições projetadas (30/60/90 dias)
+    # Posições projetadas (7/15/30/60/90 dias)
     def _proj(dias):
         dt_f  = str(hoje + timedelta(days=dias))
         dados = db.fc_diario(str(hoje), dt_f, inc_alta, inc_media,
@@ -102,6 +102,8 @@ def _capturar_dados(hoje: date, inc_alta: bool, inc_media: bool,
             "total":             round(posicao["total"], 2),
         },
         "projecao": {
+            "7d":  round(_proj(7),  2),
+            "15d": round(_proj(15), 2),
             "30d": round(_proj(30), 2),
             "60d": round(_proj(60), 2),
             "90d": round(_proj(90), 2),
@@ -351,27 +353,31 @@ def render():
                      delta_color="normal")
 
         st.markdown("#### Projeções")
-        col_p1, col_p2, col_p3 = st.columns(3)
-        for col, label, key in [(col_p1, "30 dias", "30d"),
-                                 (col_p2, "60 dias", "60d"),
-                                 (col_p3, "90 dias", "90d")]:
-            def _proj_atual(dias):
-                dt_f  = str(hoje + timedelta(days=dias))
-                dados_fc = db.fc_diario(str(hoje), dt_f,
-                                        params.get("inc_alta", True),
-                                        params.get("inc_media", False),
-                                        erp_corte_status=params.get("erp_corte", True),
-                                        inc_fci=params.get("inc_fci", True),
-                                        inc_fcf=params.get("inc_fcf", True))
-                return posicao_atual["total"] + sum(r["valor_final"] or 0 for r in dados_fc)
 
-            dias_map = {"30d": 30, "60d": 60, "90d": 90}
-            p_snap   = proj_.get(key, 0)
-            p_atual  = _proj_atual(dias_map[key])
-            col.metric(f"Projeção {label}",
-                       f"R$ {p_atual:,.2f}",
-                       delta=f"R$ {p_atual - p_snap:,.2f} vs previsto",
-                       delta_color="normal")
+        def _proj_atual(dias):
+            dt_f  = str(hoje + timedelta(days=dias))
+            dados_fc = db.fc_diario(str(hoje), dt_f,
+                                    params.get("inc_alta", True),
+                                    params.get("inc_media", False),
+                                    erp_corte_status=params.get("erp_corte", True),
+                                    inc_fci=params.get("inc_fci", True),
+                                    inc_fcf=params.get("inc_fcf", True))
+            return posicao_atual["total"] + sum(r["valor_final"] or 0 for r in dados_fc)
+
+        dias_map = {"7d": 7, "15d": 15, "30d": 30, "60d": 60, "90d": 90}
+        labels_map = {"7d": "7 dias", "15d": "15 dias", "30d": "30 dias", "60d": "60 dias", "90d": "90 dias"}
+
+        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
+        _proj_cols = [col_p1, col_p2, col_p3, col_p4, col_p5]
+        for idx, key in enumerate(["7d", "15d", "30d", "60d", "90d"]):
+            p_snap  = proj_.get(key, 0)
+            p_atual = _proj_atual(dias_map[key])
+            _proj_cols[idx].metric(
+                f"Projeção {labels_map[key]}",
+                f"R$ {p_atual:,.2f}",
+                delta=f"R$ {p_atual - p_snap:,.2f} vs previsto",
+                delta_color="normal"
+            )
 
         st.markdown("#### FUP Vendas")
         col_f1, col_f2, col_f3 = st.columns(3)
