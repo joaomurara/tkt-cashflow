@@ -98,6 +98,7 @@ PAGINAS = {
     "🧮 Simulação de Venda": "simulacao",
     "📈 Indicadores":        "indicadores",
     "📉 Gráfico":            "grafico",
+    "💱 Câmbios":            "cambios",
     "📡 Terminal Financeiro":"terminal_financeiro",
 }
 
@@ -229,6 +230,9 @@ elif pagina == "indicadores":
 elif pagina == "grafico":
     from pages import grafico
     grafico.render()
+elif pagina == "cambios":
+    from pages import cambios
+    cambios.render()
 elif pagina == "terminal_financeiro":
     from pages import terminal_financeiro
     terminal_financeiro.render()

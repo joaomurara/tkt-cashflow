@@ -173,6 +173,27 @@ def init_db():
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS cambios_disponiveis (
+                id               BIGSERIAL PRIMARY KEY,
+                descricao        TEXT,
+                moeda            TEXT DEFAULT 'USD',
+                valor_me         DOUBLE PRECISION,
+                data_entrada     TEXT,
+                taxa_ptax_entrada DOUBLE PRECISION,
+                status           TEXT DEFAULT 'DISPONIVEL',
+                origem           TEXT DEFAULT 'MANUAL',
+                origem_id        INTEGER,
+                data_fechamento  TEXT,
+                taxa_efetiva     DOUBLE PRECISION,
+                ptax_fechamento  DOUBLE PRECISION,
+                spread           DOUBLE PRECISION,
+                spread_pct       DOUBLE PRECISION,
+                observacoes      TEXT,
+                criado_em        TEXT DEFAULT NOW()::TEXT
+            )
+        """)
+
         _migrar_db(cur)
 
 
@@ -772,6 +793,132 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
         r["saldo_acumulado"] = round(saldo, 2)
 
     return rows
+
+
+# ─── CÂMBIOS DISPONÍVEIS ─────────────────────────────────────────────────────
+
+def inserir_cambio(dados: dict) -> int:
+    """Insere um novo câmbio disponível. Retorna o id criado."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO cambios_disponiveis
+                (descricao, moeda, valor_me, data_entrada, taxa_ptax_entrada,
+                 status, origem, origem_id, observacoes)
+            VALUES (%s, %s, %s, %s, %s, 'DISPONIVEL', %s, %s, %s)
+            RETURNING id
+        """, (
+            dados.get("descricao"),
+            dados.get("moeda", "USD"),
+            dados.get("valor_me"),
+            dados.get("data_entrada"),
+            dados.get("taxa_ptax_entrada"),
+            dados.get("origem", "MANUAL"),
+            dados.get("origem_id"),
+            dados.get("observacoes"),
+        ))
+        return cur.fetchone()["id"]
+
+
+def listar_cambios(status: str | None = None) -> list[dict]:
+    """Lista câmbios. status=None retorna todos; 'DISPONIVEL' só os abertos."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        if status:
+            cur.execute(
+                "SELECT * FROM cambios_disponiveis WHERE status = %s ORDER BY data_entrada DESC",
+                (status,)
+            )
+        else:
+            cur.execute("SELECT * FROM cambios_disponiveis ORDER BY data_entrada DESC")
+        return [dict(r) for r in cur.fetchall()]
+
+
+def fechar_cambio(cambio_id: int, data_fechamento: str, taxa_efetiva: float,
+                  ptax_fechamento: float, observacoes: str | None = None):
+    """Fecha um câmbio, registrando taxa efetiva e calculando spread."""
+    spread = taxa_efetiva - ptax_fechamento
+    spread_pct = (spread / ptax_fechamento * 100) if ptax_fechamento else 0
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE cambios_disponiveis SET
+                status          = 'FECHADO',
+                data_fechamento = %s,
+                taxa_efetiva    = %s,
+                ptax_fechamento = %s,
+                spread          = %s,
+                spread_pct      = %s,
+                observacoes     = COALESCE(%s, observacoes)
+            WHERE id = %s
+        """, (data_fechamento, taxa_efetiva, ptax_fechamento,
+              spread, spread_pct, observacoes, cambio_id))
+
+
+def cancelar_cambio(cambio_id: int):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE cambios_disponiveis SET status = 'CANCELADO' WHERE id = %s",
+            (cambio_id,)
+        )
+
+
+def reabrir_cambio(cambio_id: int):
+    """Reabre um câmbio fechado de volta para DISPONIVEL."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE cambios_disponiveis SET
+                status = 'DISPONIVEL',
+                data_fechamento = NULL,
+                taxa_efetiva = NULL,
+                ptax_fechamento = NULL,
+                spread = NULL,
+                spread_pct = NULL
+            WHERE id = %s
+        """, (cambio_id,))
+
+
+def buscar_recebiveis_exportacao(termo: str = "") -> list[dict]:
+    """
+    Busca recebíveis CREDITO PENDENTES em DATABASE_ERP e PROVISOES
+    para vincular a um câmbio. Filtra por termo (razao_social / descricao / codigo).
+    """
+    with get_conn() as conn:
+        cur = conn.cursor()
+        like = f"%{termo}%" if termo else "%"
+        cur.execute("""
+            SELECT id, 'DATABASE' AS origem, razao_social, descricao, codigo,
+                   vencimento, valor_final, status
+            FROM database_erp
+            WHERE operacao = 'CREDITO'
+              AND COALESCE(status, 'PENDENTE') NOT IN ('PAGO', 'RECEBIDO')
+              AND (razao_social ILIKE %s OR descricao ILIKE %s OR codigo ILIKE %s)
+            UNION ALL
+            SELECT id, 'PROVISOES' AS origem, razao_social, descricao, codigo,
+                   vencimento, valor_final, NULL AS status
+            FROM provisoes
+            WHERE operacao = 'CREDITO'
+              AND (razao_social ILIKE %s OR descricao ILIKE %s OR codigo ILIKE %s)
+            ORDER BY vencimento DESC
+            LIMIT 100
+        """, (like, like, like, like, like, like))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def marcar_recebivel_recebido(origem: str, origem_id: int):
+    """Marca o lançamento de origem como RECEBIDO."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        if origem == "DATABASE":
+            cur.execute(
+                "UPDATE database_erp SET status = 'RECEBIDO' WHERE id = %s",
+                (origem_id,)
+            )
+        elif origem == "PROVISOES":
+            # Provisões não têm campo status, mas podemos excluir ou apenas registrar
+            pass  # mantém intacto — usuário pode excluir manualmente se quiser
 
 
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
