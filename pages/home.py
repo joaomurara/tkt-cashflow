@@ -8,7 +8,13 @@ import db
 
 
 def render():
-    st.title("💰 TKT Cash Flow")
+    _logo = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logo_tecnontok_basico.png")
+    col_logo, col_title = st.columns([1, 8])
+    with col_logo:
+        if os.path.exists(_logo):
+            st.image(_logo, width=72)
+    with col_title:
+        st.title("TKT Cash Flow")
     st.markdown(f"**{date.today().strftime('%d/%m/%Y')}** — Bem-vindo ao painel de fluxo de caixa.")
 
     # Totais rápidos
