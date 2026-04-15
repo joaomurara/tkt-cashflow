@@ -4,6 +4,7 @@ Extraído de exportar_pipedrive.py e adaptado para usar db.py (SQLite)
 """
 
 import os
+import time
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
@@ -32,10 +33,8 @@ ETIQUETA_OBRIGATORIA    = "TAG FINANCAS"
 ETIQUETA_OBRIGATORIA_ID = None  # resolvido dinamicamente pelo nome
 
 # ─── CÂMBIO ─────────────────────────────────────────────────────────────────
-CAMBIO_API        = "https://economia.awesomeapi.com.br/json/last/{pairs}"
-MOEDAS_DIRETAS    = ["USD", "EUR", "ARS", "COP", "PEN", "CRC"]
-MOEDAS_CRUZADAS   = ["HNL", "GTQ"]
-MOEDAS_PAREADAS_USD = ["PAB"]
+CAMBIO_API_URL    = "https://open.er-api.com/v6/latest/USD"   # sem rate limit
+TODAS_MOEDAS      = ["USD", "EUR", "ARS", "COP", "PEN", "CRC", "HNL", "GTQ", "PAB"]
 
 # ─── CUSTOS E IMPOSTOS PADRÃO ────────────────────────────────────────────────
 CUSTOS_PADRAO = [
@@ -54,47 +53,74 @@ PRAZO_BASE_CUSTOS = 60
 
 # ─── CÂMBIO ─────────────────────────────────────────────────────────────────
 
+# Cache em memória: evita chamar a API mais de uma vez por hora por processo
+_cambio_cache: dict = {}
+_cambio_cache_ts: float = 0.0
+_CAMBIO_TTL: int = 3600  # 1 hora
+
 def buscar_cambio(log_fn=None):
-    """Retorna dict {moeda: taxa_BRL}. log_fn é chamado com mensagens de log."""
-    cambio = {"BRL": 1.0}
+    """Retorna dict {moeda: taxa_BRL}.
+    - Usa open.er-api.com (sem rate limit, sem chave de API).
+    - Resultado é cacheado por 1 hora em memória.
+    - Tenta até 3 vezes com backoff em caso de erro.
+    """
+    global _cambio_cache, _cambio_cache_ts
+
     _log = log_fn or print
-    try:
-        pares_diretos  = ",".join(f"{m}-BRL" for m in MOEDAS_DIRETAS)
-        pares_cruzados = ",".join(f"USD-{m}" for m in MOEDAS_CRUZADAS)
-        todos = f"{pares_diretos},{pares_cruzados}"
 
-        resp = requests.get(CAMBIO_API.format(pairs=todos), timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
+    # ── Retorna cache se ainda válido ─────────────────────────────────────────
+    if _cambio_cache and (time.time() - _cambio_cache_ts) < _CAMBIO_TTL:
+        _log("💱 Câmbio carregado do cache (atualizado há menos de 1h)")
+        return dict(_cambio_cache)
 
-        usd_brl = None
-        usd_cruzados = {}
+    cambio = {"BRL": 1.0}
 
-        for key, val in data.items():
-            code   = val.get("code")
-            codein = val.get("codein")
-            taxa   = float(val.get("bid", 0))
-            if not taxa:
+    # ── Tenta até 3 vezes com backoff exponencial ─────────────────────────────
+    MAX_TENTATIVAS = 3
+    for tentativa in range(1, MAX_TENTATIVAS + 1):
+        try:
+            resp = requests.get(CAMBIO_API_URL, timeout=15)
+            if resp.status_code == 429:
+                espera = 2 ** tentativa
+                _log(f"⚠️ API câmbio: limite (429). Aguardando {espera}s… ({tentativa}/{MAX_TENTATIVAS})")
+                time.sleep(espera)
                 continue
-            if codein == "BRL":
-                cambio[code] = taxa
-                if code == "USD":
-                    usd_brl = taxa
-                _log(f"💱 {code}/BRL = {taxa:.4f}  ({val.get('create_date', '')})")
-            elif code == "USD" and codein in MOEDAS_CRUZADAS:
-                usd_cruzados[codein] = taxa
+            resp.raise_for_status()
+            data  = resp.json()
+            rates = data.get("rates", {})
 
-        if usd_brl:
-            for moeda, usd_x in usd_cruzados.items():
-                if usd_x > 0:
-                    taxa_cruzada = round(usd_brl / usd_x, 4)
-                    cambio[moeda] = taxa_cruzada
-                    _log(f"💱 {moeda}/BRL = {taxa_cruzada:.4f}  (via USD)")
-            for moeda in MOEDAS_PAREADAS_USD:
-                cambio[moeda] = usd_brl
-                _log(f"💱 {moeda}/BRL = {usd_brl:.4f}  (pareada USD)")
-    except Exception as e:
-        _log(f"⚠️ Não foi possível buscar câmbio: {e}")
+            # A API retorna taxas base USD: rates["BRL"] = qtd BRL por 1 USD
+            # Para qualquer moeda X: X/BRL = rates["BRL"] / rates["X"]
+            usd_brl = float(rates.get("BRL", 0))
+            if not usd_brl:
+                raise ValueError("BRL não encontrado na resposta da API")
+
+            for moeda in TODAS_MOEDAS:
+                usd_x = float(rates.get(moeda, 0))
+                if not usd_x:
+                    _log(f"⚠️ Moeda {moeda} não encontrada na API")
+                    continue
+                taxa = round(usd_brl / usd_x, 4)
+                cambio[moeda] = taxa
+                _log(f"💱 {moeda}/BRL = {taxa:.4f}")
+
+            # ── Salva no cache ─────────────────────────────────────────────────
+            _cambio_cache    = dict(cambio)
+            _cambio_cache_ts = time.time()
+            _log("✅ Câmbio atualizado com sucesso (open.er-api.com)")
+            break  # sucesso — sai do loop
+
+        except Exception as e:
+            if tentativa == MAX_TENTATIVAS:
+                _log(f"⚠️ Não foi possível buscar câmbio após {MAX_TENTATIVAS} tentativas: {e}")
+                if _cambio_cache:
+                    _log("💱 Usando último câmbio em cache como fallback")
+                    return dict(_cambio_cache)
+            else:
+                espera = 2 ** tentativa
+                _log(f"⚠️ Erro ao buscar câmbio: {e}. Aguardando {espera}s…")
+                time.sleep(espera)
+
     return cambio
 
 
