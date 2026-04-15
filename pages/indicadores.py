@@ -378,16 +378,16 @@ def render():
     inc_fci   = col_pp3.checkbox("Incluir FCI",   value=True, key="ind_fci")
     inc_fcf   = col_pp4.checkbox("Incluir FCF",   value=True, key="ind_fcf")
 
-    col_p1, col_p2, col_p3 = st.columns(3)
-    for label, dias in [("30 dias", 30), ("60 dias", 60), ("90 dias", 90)]:
+    col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
+    _pp_cols = [col_p1, col_p2, col_p3, col_p4, col_p5]
+    for idx, (label, dias) in enumerate([("7 dias", 7), ("15 dias", 15), ("30 dias", 30), ("60 dias", 60), ("90 dias", 90)]):
         dt_fim = str(hoje + timedelta(days=dias))
         dados = db.fc_diario(str(hoje), dt_fim, inc_alta, inc_media, erp_corte_status=cfg_corte,
                              inc_fci=inc_fci, inc_fcf=inc_fcf)
         fluxo = sum(r["valor_final"] or 0 for r in dados)
         posicao = total_consolidado + fluxo  # 1. Parte da posição consolidada
 
-        col = [col_p1, col_p2, col_p3][["30 dias","60 dias","90 dias"].index(label)]
-        col.metric(
+        _pp_cols[idx].metric(
             f"Posição em {label}",
             f"R$ {posicao:,.2f}",
             delta=f"R$ {fluxo:,.2f} de fluxo",
