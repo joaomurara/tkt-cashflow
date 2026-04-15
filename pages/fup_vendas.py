@@ -576,6 +576,13 @@ def render():
                             type="primary",
                             help="Copia todas as linhas deste negócio para Provisões"
                         ):
+                            # DEBUG temporário — mostra o que está sendo processado
+                            linhas_fup = db.listar_fup(deal_id=str(did))
+                            st.info(
+                                f"🔍 DEBUG | deal_id: `{did}` | "
+                                f"linhas no FUP: `{len(linhas_fup)}`"
+                            )
+
                             n, err = db.mover_fup_para_provisoes(
                                 deal_id=did,
                                 remover_do_fup=not manter_fup
@@ -593,7 +600,7 @@ def render():
                                 )
                                 st.rerun()
                             else:
-                                st.warning("Nenhuma linha encontrada para este negócio.")
+                                st.warning(f"Nenhuma linha no FUP para deal_id `{did}`.")
 
         else:
             # Tabela completa (visão original)
