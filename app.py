@@ -6,7 +6,7 @@ Ponto de entrada principal do Streamlit
 import streamlit as st
 import sys
 import os
-from PIL import Image
+import base64
 
 # Garante que o diretório do app está no path para imports relativos
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,8 +20,16 @@ import auth
 auth.require_login()
 
 # ─── CONFIGURAÇÃO DA PÁGINA ──────────────────────────────────────────────────
+def _img_to_b64(path: str) -> str:
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
 _icon_path = os.path.join(os.path.dirname(__file__), "logo_tecnontok_basico.png")
-_page_icon = Image.open(_icon_path) if os.path.exists(_icon_path) else "💰"
+try:
+    from PIL import Image as _PIL
+    _page_icon = _PIL.open(_icon_path)
+except Exception:
+    _page_icon = "💰"
 
 st.set_page_config(
     page_title="TKT Cash Flow",
@@ -29,6 +37,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Logo no topo do app (sidebar header)
+if os.path.exists(_icon_path):
+    st.logo(_icon_path, size="large")
 
 # ─── INICIALIZA BANCO ────────────────────────────────────────────────────────
 db.init_db()
