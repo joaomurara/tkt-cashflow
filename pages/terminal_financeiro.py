@@ -25,58 +25,57 @@ except ImportError:
 # FUNÇÕES DE DADOS — reaproveitadas do terminal_financeiro original
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Câmbio — usa BCB PTAX (mesma API já funcionando no app) ──────────────────
+# ── Câmbio — usa CDN Cloudflare Currency API (mesma fonte do FUP Vendas) ──────
 import time as _time
 
-_ptax_brl: dict  = {}   # {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...}
-_ptax_brl_ts: float = 0.0
-_PTAX_TTL = 14400  # 4 horas (PTAX é diário)
+_cf_rates: dict  = {}   # {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...} — valor em BRL
+_cf_rates_ts: float = 0.0
+_CF_TTL = 3600  # 1 hora
 
-_MOEDAS_BCB = ["USD", "EUR", "GBP", "JPY", "ARS", "CAD", "AUD", "CHF",
-               "CNY", "COP", "PEN", "CRC", "HNL", "GTQ"]
+_CF_URL      = "https://latest.currency-api.pages.dev/v1/currencies/usd.json"
+_CF_FALLBACK = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json"
 
-def _fetch_ptax(moeda: str, date_str: str) -> float:
-    """Retorna taxa PTAX venda de uma moeda vs BRL em uma data (MM-DD-YYYY)."""
-    url = (
-        "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
-        f"CotacaoMoedaDia(moeda=@moeda,dataCotacao=@dataCotacao)"
-        f"?@moeda='{moeda}'&@dataCotacao='{date_str}'"
-        "&$top=1&$format=json&$select=cotacaoVenda"
-    )
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-    vals = r.json().get("value", [])
-    return float(vals[0]["cotacaoVenda"]) if vals else 0.0
+def _get_cf_rates() -> dict:
+    """Busca todas as taxas via CDN Cloudflare. 1 chamada para todos os pares. Cache 1h."""
+    global _cf_rates, _cf_rates_ts
+    if _cf_rates and (_time.time() - _cf_rates_ts) < _CF_TTL:
+        return _cf_rates
 
-def _get_ptax_rates() -> dict:
-    """Busca todas as taxas BRL via BCB PTAX. Cache de módulo de 4h."""
-    global _ptax_brl, _ptax_brl_ts
-    if _ptax_brl and (_time.time() - _ptax_brl_ts) < _PTAX_TTL:
-        return _ptax_brl
-    rates = {"BRL": 1.0}
-    # Tenta até 5 dias para trás (fins de semana / feriados sem PTAX)
-    for delta in range(5):
-        d = (datetime.now() - timedelta(days=delta)).strftime("%m-%d-%Y")
-        encontrou = False
-        for moeda in _MOEDAS_BCB:
-            try:
-                taxa = _fetch_ptax(moeda, d)
-                if taxa > 0:
-                    rates[moeda] = taxa
-                    encontrou = True
-            except Exception:
-                continue
-        if encontrou and "USD" in rates:
+    data = None
+    for url in [_CF_URL, _CF_FALLBACK]:
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            data = r.json()
             break
-    if len(rates) > 1:
-        _ptax_brl    = rates
-        _ptax_brl_ts = _time.time()
-    return _ptax_brl
+        except Exception:
+            continue
+
+    if not data:
+        return _cf_rates  # retorna cache antigo se disponível
+
+    raw = data.get("usd", {})  # chaves em minúsculas: {"brl": 5.70, "eur": 0.92, ...}
+    usd_brl = float(raw.get("brl", 0))
+    if not usd_brl:
+        return _cf_rates
+
+    rates = {"BRL": 1.0, "USD": usd_brl}
+    for code, usd_x in raw.items():
+        try:
+            val = float(usd_x)
+            if val > 0:
+                rates[code.upper()] = round(usd_brl / val, 6)
+        except Exception:
+            continue
+
+    _cf_rates    = rates
+    _cf_rates_ts = _time.time()
+    return _cf_rates
 
 def get_pair_rate(base, quote):
-    """Retorna taxa de câmbio entre dois pares de moedas via BCB PTAX."""
+    """Retorna taxa de câmbio entre dois pares de moedas via CDN Cloudflare."""
     try:
-        rates = _get_ptax_rates()   # {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...}
+        rates = _get_cf_rates()   # {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...}
         b = base.upper()
         q = quote.upper()
         b_brl = rates.get(b, 1.0 if b == "BRL" else 0.0)
@@ -724,9 +723,9 @@ def render():
         MOEDAS_BRL = ["USD", "EUR", "GBP", "JPY", "ARS", "CAD", "AUD", "CHF"]
 
         if st.button("🔄 Atualizar cotações", key="tf_cambio_btn"):
-            global _ptax_brl, _ptax_brl_ts
-            _ptax_brl    = {}
-            _ptax_brl_ts = 0.0
+            global _cf_rates, _cf_rates_ts
+            _cf_rates    = {}
+            _cf_rates_ts = 0.0
             st.rerun()
 
         with st.spinner("Buscando cotações..."):
