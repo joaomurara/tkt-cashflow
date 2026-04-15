@@ -26,32 +26,43 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Câmbio ────────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600, show_spinner=False)
-def _get_er_rates() -> dict:
-    """Busca taxas USD-base via open.er-api.com. Cache Streamlit de 1h."""
+try:
+    from pipedrive_core import buscar_cambio as _buscar_cambio
+except ImportError:
     try:
-        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=15)
-        r.raise_for_status()
-        return r.json().get("rates", {})  # chaves em MAIÚSCULO: {"USD":1, "BRL":5.7, ...}
-    except Exception:
-        return {}
+        from tkt_app.pipedrive_core import buscar_cambio as _buscar_cambio
+    except ImportError:
+        _buscar_cambio = None
+
+def _get_er_rates() -> dict:
+    """Retorna dict {MOEDA: taxa_BRL} via pipedrive_core (já funcionando)."""
+    if _buscar_cambio:
+        return _buscar_cambio()
+    return {}
 
 def get_pair_rate(base, quote):
+    """Retorna taxa de câmbio entre dois pares de moedas."""
     try:
-        rates = _get_er_rates()
-        base_usd  = float(rates.get(base.upper(), 0))
-        quote_usd = float(rates.get(quote.upper(), 0))
-        if not base_usd or not quote_usd:
-            return None
-        bid = round(quote_usd / base_usd, 4)
-        return {
-            "bid":  bid,
-            "ask":  bid,
-            "high": bid,
-            "low":  bid,
-            "pct":  0.0,
-            "name": f"{base}/{quote}",
-        }
+        rates = _get_er_rates()   # ex: {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...}
+        b = base.upper()
+        q = quote.upper()
+
+        # Caso direto: taxa já disponível como X/BRL
+        if q == "BRL" and b in rates:
+            bid = round(float(rates[b]), 4)
+            return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
+
+        # Caso inverso: BRL/X
+        if b == "BRL" and q in rates:
+            bid = round(1.0 / float(rates[q]), 4)
+            return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
+
+        # Cruzado: X/Y via BRL (X_BRL / Y_BRL)
+        if b in rates and q in rates:
+            bid = round(float(rates[b]) / float(rates[q]), 4)
+            return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
+
+        return None
     except Exception:
         return None
 
