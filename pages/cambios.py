@@ -192,6 +192,32 @@ def render():
                                 del st.session_state[k]
                         st.rerun()
 
+                st.markdown("---")
+                st.subheader("↩️ Reverter Câmbio")
+                st.caption(
+                    "Cancela o câmbio disponível e restaura o lançamento original: "
+                    "DATABASE → status PENDENTE | PROVISÕES → re-inserido."
+                )
+
+                opc_rev = {
+                    f"#{c['id']} — {c['descricao']} ({c['moeda']} {c['valor_me']:,.2f}) "
+                    f"| origem: {c.get('origem','MANUAL')}"
+                    + (f" #{c['origem_id']}" if c.get("origem_id") else ""): c
+                    for c in cambios
+                }
+                sel_rev = st.selectbox("Câmbio a reverter", list(opc_rev.keys()), key="sel_reverter")
+                cambio_rev = opc_rev[sel_rev]
+
+                confirmar_rev = st.checkbox(
+                    f"Confirmo a reversão do câmbio #{cambio_rev['id']}",
+                    key="rev_confirm"
+                )
+                if st.button("↩️ Reverter câmbio", type="secondary", key="btn_reverter",
+                             disabled=not confirmar_rev):
+                    msg = db.reverter_cambio(cambio_rev["id"])
+                    st.success(f"✅ Câmbio #{cambio_rev['id']} cancelado. {msg}")
+                    st.rerun()
+
     # ─── ABA NOVO CÂMBIO ──────────────────────────────────────────────────────
     with tab_novo:
         if not can_edit:

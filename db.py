@@ -223,6 +223,10 @@ def _migrar_db(cur):
     cur.execute(
         "ALTER TABLE database_erp ADD COLUMN IF NOT EXISTS data_previsao TEXT DEFAULT NULL"
     )
+    # Snapshot do lançamento original para permitir reversão do câmbio
+    cur.execute(
+        "ALTER TABLE cambios_disponiveis ADD COLUMN IF NOT EXISTS origem_snapshot TEXT DEFAULT NULL"
+    )
 
 
 
@@ -801,14 +805,34 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
 # ─── CÂMBIOS DISPONÍVEIS ─────────────────────────────────────────────────────
 
 def inserir_cambio(dados: dict) -> int:
-    """Insere um novo câmbio disponível. Retorna o id criado."""
+    """
+    Insere um novo câmbio disponível.
+    Se origem_id informado, captura snapshot do registro original antes da baixa.
+    Retorna o id criado.
+    """
+    origem    = dados.get("origem", "MANUAL")
+    origem_id = dados.get("origem_id")
+    snapshot  = None
+
+    if origem_id:
+        # Captura snapshot do registro original para permitir reversão futura
+        with get_conn() as conn:
+            cur = conn.cursor()
+            if origem == "DATABASE":
+                cur.execute("SELECT * FROM database_erp WHERE id = %s", (origem_id,))
+            elif origem == "PROVISOES":
+                cur.execute("SELECT * FROM provisoes WHERE id = %s", (origem_id,))
+            row = cur.fetchone()
+            if row:
+                snapshot = json.dumps(dict(row), default=str)
+
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO cambios_disponiveis
                 (descricao, moeda, valor_me, data_entrada, taxa_ptax_entrada,
-                 status, origem, origem_id, observacoes)
-            VALUES (%s, %s, %s, %s, %s, 'DISPONIVEL', %s, %s, %s)
+                 status, origem, origem_id, observacoes, origem_snapshot)
+            VALUES (%s, %s, %s, %s, %s, 'DISPONIVEL', %s, %s, %s, %s)
             RETURNING id
         """, (
             dados.get("descricao"),
@@ -816,9 +840,10 @@ def inserir_cambio(dados: dict) -> int:
             dados.get("valor_me"),
             dados.get("data_entrada"),
             dados.get("taxa_ptax_entrada"),
-            dados.get("origem", "MANUAL"),
-            dados.get("origem_id"),
+            origem,
+            origem_id,
             dados.get("observacoes"),
+            snapshot,
         ))
         return cur.fetchone()["id"]
 
@@ -881,6 +906,67 @@ def reabrir_cambio(cambio_id: int):
                 spread_pct = NULL
             WHERE id = %s
         """, (cambio_id,))
+
+
+def reverter_cambio(cambio_id: int) -> str:
+    """
+    Reverte um câmbio DISPONIVEL:
+    - Restaura o lançamento original na DATABASE (status → PENDENTE)
+      ou PROVISOES (re-insere a partir do snapshot).
+    - Marca o câmbio como CANCELADO.
+    Retorna uma mensagem descritiva do resultado.
+    """
+    with get_conn() as conn:
+        cur = conn.cursor()
+
+        # Busca o câmbio
+        cur.execute("SELECT * FROM cambios_disponiveis WHERE id = %s", (cambio_id,))
+        cambio = cur.fetchone()
+        if not cambio:
+            return "Câmbio não encontrado."
+        if cambio["status"] != "DISPONIVEL":
+            return f"Só é possível reverter câmbios com status DISPONIVEL (atual: {cambio['status']})."
+
+        origem    = cambio.get("origem")
+        origem_id = cambio.get("origem_id")
+        snapshot  = cambio.get("origem_snapshot")
+
+        msg = ""
+
+        if origem == "DATABASE" and origem_id:
+            cur.execute(
+                "UPDATE database_erp SET status = 'PENDENTE' WHERE id = %s",
+                (origem_id,)
+            )
+            msg = f"Lançamento DATABASE #{origem_id} restaurado para PENDENTE."
+
+        elif origem == "PROVISOES" and snapshot:
+            dados = json.loads(snapshot)
+            # Remove o id original — o banco gerará um novo
+            dados.pop("id", None)
+            cols   = list(dados.keys())
+            vals   = [dados[c] for c in cols]
+            placeholders = ", ".join(["%s"] * len(cols))
+            col_str = ", ".join(cols)
+            cur.execute(
+                f"INSERT INTO provisoes ({col_str}) VALUES ({placeholders})",
+                vals
+            )
+            msg = "Provisão restaurada com novo ID."
+
+        elif origem == "PROVISOES" and not snapshot:
+            msg = "Snapshot não disponível — provisão não pôde ser restaurada (foi criado antes desta funcionalidade)."
+
+        else:
+            msg = "Câmbio MANUAL — nenhum lançamento para restaurar."
+
+        # Marca câmbio como CANCELADO
+        cur.execute(
+            "UPDATE cambios_disponiveis SET status = 'CANCELADO' WHERE id = %s",
+            (cambio_id,)
+        )
+
+        return msg or "Câmbio revertido."
 
 
 def buscar_recebiveis_exportacao(termo: str = "") -> list[dict]:
