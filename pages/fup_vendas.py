@@ -587,6 +587,8 @@ def render():
                                 deal_id=did,
                                 remover_do_fup=not manter_fup
                             )
+                            # DEBUG: mostra retorno da função
+                            st.info(f"🔍 DEBUG retorno | n=`{n}` | err=`{err}`")
                             if err:
                                 st.error(
                                     f"**Erro ao mover para Provisões**\n\n"
@@ -598,7 +600,7 @@ def render():
                                     f"✅ {n} linha(s) de **{cliente}** movidas para Provisões"
                                     + (" e removidas do FUP." if not manter_fup else " (mantidas no FUP).")
                                 )
-                                st.rerun()
+                                # st.rerun()  # DEBUG: desabilitado para ver a mensagem
                             else:
                                 st.warning(f"Nenhuma linha no FUP para deal_id `{did}`.")
 
