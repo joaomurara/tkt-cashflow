@@ -47,16 +47,98 @@ def render():
     st.markdown(f"**Total em caixa:** `R$ {total_bancos:,.2f}`")
     st.markdown("---")
 
+    hoje = date.today()
+    cfg_corte = st.session_state.get("cfg_corte_status", True)
+
+    # ─── PROJEÇÃO 2 SEMANAS (10 DIAS ÚTEIS) ──────────────────────────────
+    st.subheader("📆 Projeção — Próximos 10 Dias Úteis")
+
+    # Base date: data do saldo mais recente (ou hoje)
+    if saldos:
+        try:
+            base_date = date.fromisoformat(saldos[0]["data"])
+        except Exception:
+            base_date = hoje
+    else:
+        base_date = hoje
+
+    # Gera os 10 próximos dias úteis a partir de base_date
+    def _proximos_uteis(start: date, n: int):
+        dias = []
+        d = start
+        while len(dias) < n:
+            d += timedelta(days=1)
+            if d.weekday() < 5:  # 0=seg … 4=sex
+                dias.append(d)
+        return dias
+
+    DIAS_PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+
+    inc_alta_2s  = st.checkbox("Incluir ALTA",  value=st.session_state.get("cfg_inc_alta",  True), key="proj2s_alta")
+    inc_media_2s = st.checkbox("Incluir MEDIA", value=st.session_state.get("cfg_inc_media", False), key="proj2s_media")
+    inc_fci_2s   = st.checkbox("Incluir FCI",   value=True, key="proj2s_fci")
+    inc_fcf_2s   = st.checkbox("Incluir FCF",   value=True, key="proj2s_fcf")
+
+    dias_uteis = _proximos_uteis(base_date, 10)
+
+    rows_proj = []
+    saldo_acc = total_bancos
+    for d in dias_uteis:
+        linhas_dia = db.fc_diario(
+            str(d), str(d),
+            inc_alta_2s, inc_media_2s,
+            erp_corte_status=cfg_corte,
+            inc_fci=inc_fci_2s,
+            inc_fcf=inc_fcf_2s,
+        )
+        entradas = sum(r["valor_final"] for r in linhas_dia if (r["valor_final"] or 0) > 0)
+        saidas   = sum(r["valor_final"] for r in linhas_dia if (r["valor_final"] or 0) < 0)
+        saldo_dia = entradas + saidas
+        saldo_acc += saldo_dia
+        rows_proj.append({
+            "Data":            d.strftime("%d/%m/%Y"),
+            "Dia":             DIAS_PT[d.weekday()],
+            "Entradas":        entradas,
+            "Saídas":          abs(saidas),
+            "Saldo do Dia":    saldo_dia,
+            "Saldo Acumulado": saldo_acc,
+        })
+
+    df_proj = pd.DataFrame(rows_proj)
+
+    def _fmt(v, color=True):
+        if color:
+            if v > 0:
+                return f"🟢 R$ {v:,.2f}"
+            elif v < 0:
+                return f"🔴 R$ {abs(v):,.2f}"
+            else:
+                return f"R$ 0,00"
+        return f"R$ {v:,.2f}"
+
+    df_show_proj = df_proj.copy()
+    df_show_proj["Entradas"]        = df_show_proj["Entradas"].apply(lambda x: f"R$ {x:,.2f}")
+    df_show_proj["Saídas"]          = df_show_proj["Saídas"].apply(lambda x: f"R$ {x:,.2f}")
+    df_show_proj["Saldo do Dia"]    = df_show_proj["Saldo do Dia"].apply(_fmt)
+    df_show_proj["Saldo Acumulado"] = df_show_proj["Saldo Acumulado"].apply(lambda x: _fmt(x, color=True))
+
+    if base_date != hoje:
+        st.caption(f"Base: saldo bancário em {base_date.strftime('%d/%m/%Y')} — R$ {total_bancos:,.2f}")
+    else:
+        st.caption(f"Base: saldo bancário atual — R$ {total_bancos:,.2f}")
+
+    st.dataframe(df_show_proj, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
     # ─── POSIÇÃO PROJETADA ─────────────────────────────────────────────────
     st.subheader("📅 Posição de Caixa Projetada")
-    hoje = date.today()
 
     col_p1, col_p2, col_p3 = st.columns(3)
     inc_alta  = st.checkbox("Incluir ALTA no cálculo",  value=st.session_state.get("cfg_inc_alta",  True))
     inc_media = st.checkbox("Incluir MEDIA no cálculo", value=st.session_state.get("cfg_inc_media", False))
     inc_fci   = st.checkbox("Incluir FCI nas Provisões", value=True, key="ind_fci")
     inc_fcf   = st.checkbox("Incluir FCF nas Provisões", value=True, key="ind_fcf")
-    cfg_corte = st.session_state.get("cfg_corte_status", True)
 
     for label, dias in [("30 dias", 30), ("60 dias", 60), ("90 dias", 90)]:
         dt_fim = str(hoje + timedelta(days=dias))
