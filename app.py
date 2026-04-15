@@ -11,6 +11,12 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import db
+import auth
+
+# ─── AUTENTICAÇÃO ────────────────────────────────────────────────────────────
+# Deve ser chamado ANTES de set_page_config quando não autenticado.
+# require_login() chama set_page_config internamente se exibir o login.
+auth.require_login()
 
 # ─── CONFIGURAÇÃO DA PÁGINA ──────────────────────────────────────────────────
 st.set_page_config(
@@ -87,6 +93,14 @@ with st.sidebar:
     else:
         st.markdown("### 🏭 Tecnotok")
     st.markdown("## TKT Cash Flow")
+
+    # Usuário logado + logout
+    display = auth.get_display_name()
+    if display:
+        st.caption(f"👤 {display}")
+    if st.button("🚪 Sair", key="btn_logout"):
+        auth.logout()
+
     st.markdown("---")
 
     if "pagina" not in st.session_state:
