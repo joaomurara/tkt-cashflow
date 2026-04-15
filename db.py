@@ -472,8 +472,8 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
                 "probabilidade": l.get("probabilidade", "CONFIRMADO"),
                 "imposto":       l.get("imposto", "NAO"),
             }
-            # Usa savepoint para lidar com UniqueViolation sem abortar a transação.
-            # Se o INSERT falhar por constraint, faz UPDATE do registro existente.
+            # Usa savepoint: se INSERT falhar por UniqueViolation (pgcode 23505),
+            # reverte para o savepoint e faz UPDATE no registro conflitante.
             cur.execute("SAVEPOINT fup_prov_sp")
             try:
                 cur.execute("""
@@ -485,22 +485,24 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
                        %(descricao)s, %(vencimento)s, %(valor)s, %(valor_final)s,
                        %(semana)s, %(probabilidade)s, %(imposto)s)
                 """, prov)
-                cur.execute("RELEASE SAVEPOINT fup_prov_sp")
-            except psycopg2.errors.UniqueViolation:
-                # Volta ao savepoint e tenta atualizar o registro conflitante
+            except Exception as _e:
                 cur.execute("ROLLBACK TO SAVEPOINT fup_prov_sp")
-                cur.execute("""
-                    UPDATE provisoes SET
-                      operacao=%(operacao)s, tipo=%(tipo)s, lote=%(lote)s,
-                      razao_social=%(razao_social)s, valor=%(valor)s,
-                      valor_final=%(valor_final)s, semana=%(semana)s,
-                      probabilidade=%(probabilidade)s, imposto=%(imposto)s,
-                      atualizado_em=NOW()::TEXT
-                    WHERE codigo=%(codigo)s
-                      AND vencimento=%(vencimento)s
-                      AND descricao=%(descricao)s
-                """, prov)
-                cur.execute("RELEASE SAVEPOINT fup_prov_sp")
+                pgcode = getattr(_e, "pgcode", "") or ""
+                if pgcode == "23505":
+                    # UniqueViolation — atualiza o registro existente
+                    cur.execute("""
+                        UPDATE provisoes SET
+                          operacao=%(operacao)s, tipo=%(tipo)s, lote=%(lote)s,
+                          razao_social=%(razao_social)s, valor=%(valor)s,
+                          valor_final=%(valor_final)s, semana=%(semana)s,
+                          probabilidade=%(probabilidade)s, imposto=%(imposto)s,
+                          atualizado_em=NOW()::TEXT
+                        WHERE codigo=%(codigo)s
+                          AND vencimento=%(vencimento)s
+                          AND descricao=%(descricao)s
+                    """, prov)
+                else:
+                    raise
         if remover_do_fup:
             cur.execute("DELETE FROM fup_vendas WHERE deal_id = %s", (str(deal_id),))
     return len(linhas)
