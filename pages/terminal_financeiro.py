@@ -25,40 +25,66 @@ except ImportError:
 # FUNÇÕES DE DADOS — reaproveitadas do terminal_financeiro original
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Câmbio ────────────────────────────────────────────────────────────────────
+# ── Câmbio — usa BCB PTAX (mesma API já funcionando no app) ──────────────────
 import time as _time
 
-def _get_er_rates() -> dict:
-    """Busca taxas USD-base via open.er-api.com com cache em session_state (1h)."""
-    now = _time.time()
-    cached = st.session_state.get("_tf_er_rates", {})
-    ts     = st.session_state.get("_tf_er_ts", 0.0)
-    if cached and (now - ts) < 3600:
-        return cached
-    try:
-        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=15)
-        r.raise_for_status()
-        rates = r.json().get("rates", {})
-        if rates:
-            st.session_state["_tf_er_rates"] = rates
-            st.session_state["_tf_er_ts"]    = now
-            return rates
-    except Exception:
-        pass
-    return cached  # retorna cache antigo se falhar
+_ptax_brl: dict  = {}   # {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...}
+_ptax_brl_ts: float = 0.0
+_PTAX_TTL = 14400  # 4 horas (PTAX é diário)
+
+_MOEDAS_BCB = ["USD", "EUR", "GBP", "JPY", "ARS", "CAD", "AUD", "CHF",
+               "CNY", "COP", "PEN", "CRC", "HNL", "GTQ"]
+
+def _fetch_ptax(moeda: str, date_str: str) -> float:
+    """Retorna taxa PTAX venda de uma moeda vs BRL em uma data (MM-DD-YYYY)."""
+    url = (
+        "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+        f"CotacaoMoedaDia(moeda=@moeda,dataCotacao=@dataCotacao)"
+        f"?@moeda='{moeda}'&@dataCotacao='{date_str}'"
+        "&$top=1&$format=json&$select=cotacaoVenda"
+    )
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+    vals = r.json().get("value", [])
+    return float(vals[0]["cotacaoVenda"]) if vals else 0.0
+
+def _get_ptax_rates() -> dict:
+    """Busca todas as taxas BRL via BCB PTAX. Cache de módulo de 4h."""
+    global _ptax_brl, _ptax_brl_ts
+    if _ptax_brl and (_time.time() - _ptax_brl_ts) < _PTAX_TTL:
+        return _ptax_brl
+    rates = {"BRL": 1.0}
+    # Tenta até 5 dias para trás (fins de semana / feriados sem PTAX)
+    for delta in range(5):
+        d = (datetime.now() - timedelta(days=delta)).strftime("%m-%d-%Y")
+        encontrou = False
+        for moeda in _MOEDAS_BCB:
+            try:
+                taxa = _fetch_ptax(moeda, d)
+                if taxa > 0:
+                    rates[moeda] = taxa
+                    encontrou = True
+            except Exception:
+                continue
+        if encontrou and "USD" in rates:
+            break
+    if len(rates) > 1:
+        _ptax_brl    = rates
+        _ptax_brl_ts = _time.time()
+    return _ptax_brl
 
 def get_pair_rate(base, quote):
-    """Retorna taxa de câmbio entre dois pares de moedas via open.er-api.com."""
+    """Retorna taxa de câmbio entre dois pares de moedas via BCB PTAX."""
     try:
-        rates = _get_er_rates()   # {"USD": 1.0, "BRL": 5.70, "EUR": 0.92, ...}
+        rates = _get_ptax_rates()   # {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...}
         b = base.upper()
         q = quote.upper()
-        b_usd = float(rates.get(b, 0))
-        q_usd = float(rates.get(q, 0))
-        if not b_usd or not q_usd:
+        b_brl = rates.get(b, 1.0 if b == "BRL" else 0.0)
+        q_brl = rates.get(q, 1.0 if q == "BRL" else 0.0)
+        if not b_brl or not q_brl:
             return None
-        # rates são relativas a USD: bid = quantas unidades de Q por 1 B
-        bid = round(q_usd / b_usd, 4)
+        # bid = quantidade de Q por 1 unidade de B
+        bid = round(b_brl / q_brl, 4)
         return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
     except Exception:
         return None
@@ -698,8 +724,9 @@ def render():
         MOEDAS_BRL = ["USD", "EUR", "GBP", "JPY", "ARS", "CAD", "AUD", "CHF"]
 
         if st.button("🔄 Atualizar cotações", key="tf_cambio_btn"):
-            st.session_state.pop("_tf_er_rates", None)
-            st.session_state.pop("_tf_er_ts", None)
+            global _ptax_brl, _ptax_brl_ts
+            _ptax_brl    = {}
+            _ptax_brl_ts = 0.0
             st.rerun()
 
         with st.spinner("Buscando cotações..."):
