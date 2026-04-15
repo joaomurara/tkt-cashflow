@@ -1,0 +1,20 @@
+# Secrets e credenciais — NUNCA subir para o GitHub
+.streamlit/secrets.toml
+
+# Banco de dados local
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Sistema
+.fuse_hidden*
+.DS_Store
+Thumbs.db
+desktop.ini
