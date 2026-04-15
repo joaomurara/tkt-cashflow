@@ -735,9 +735,10 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
             FROM database_erp
             WHERE probabilidade = ANY(%s)
               {cond_fim_erp}
+              AND COALESCE(status, 'PENDENTE') NOT IN ('PAGO', 'RECEBIDO')
               AND (
                 vencimento >= %s
-                OR (COALESCE(incluir_atraso, FALSE) AND status NOT IN ('PAGO','RECEBIDO'))
+                OR COALESCE(incluir_atraso, FALSE)
               )
         """
         params_erp = p_ven + [filtros_prob] + p_fim_erp + [str(dt_ini)]
@@ -747,7 +748,9 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
                    razao_social, descricao, vencimento, valor, valor_final,
                    semana, probabilidade, imposto, status
             FROM database_erp
-            WHERE probabilidade = ANY(%s) {cond_dt}
+            WHERE probabilidade = ANY(%s)
+              AND COALESCE(status, 'PENDENTE') NOT IN ('PAGO', 'RECEBIDO')
+              {cond_dt}
         """
         params_erp = [filtros_prob] + params_dt
 
