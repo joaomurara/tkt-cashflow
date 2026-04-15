@@ -196,25 +196,6 @@ def _migrar_db(cur):
     )
 
 
-# ─── CONFIGURAÇÕES GLOBAIS ───────────────────────────────────────────────────
-
-def get_provisoes_constraints() -> list:
-    """Retorna as constraints únicas da tabela provisoes (diagnóstico)."""
-    with get_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT c.conname AS constraint_name,
-                   string_agg(a.attname, ', ' ORDER BY x.n) AS columns
-            FROM pg_constraint c
-            JOIN pg_class t ON t.oid = c.conrelid
-            JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS x(attnum, n) ON TRUE
-            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.attnum
-            WHERE t.relname = 'provisoes'
-              AND c.contype = 'u'
-            GROUP BY c.conname
-        """)
-        return [dict(r) for r in cur.fetchall()]
-
 
 _CFG_DEFAULTS = {
     "dt_ini":           "",
