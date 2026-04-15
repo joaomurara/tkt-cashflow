@@ -26,22 +26,41 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Câmbio ────────────────────────────────────────────────────────────────────
+import time as _time
+_er_rates_cache: dict = {}
+_er_rates_ts: float = 0.0
+
+def _get_er_rates() -> dict:
+    """Busca todas as taxas USD-base via open.er-api.com (sem rate limit, cache 1h)."""
+    global _er_rates_cache, _er_rates_ts
+    if _er_rates_cache and (_time.time() - _er_rates_ts) < 3600:
+        return _er_rates_cache
+    try:
+        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=10)
+        r.raise_for_status()
+        _er_rates_cache = r.json().get("rates", {})
+        _er_rates_ts = _time.time()
+    except Exception:
+        pass
+    return _er_rates_cache
+
 def get_pair_rate(base, quote):
     try:
-        url = f"https://economia.awesomeapi.com.br/json/last/{base}-{quote}"
-        r = requests.get(url, timeout=8)
-        data = r.json()
-        key = f"{base}{quote}"
-        if key in data:
-            d = data[key]
-            return {
-                "bid":  float(d.get("bid", 0)),
-                "ask":  float(d.get("ask", 0)),
-                "high": float(d.get("high", 0)),
-                "low":  float(d.get("low", 0)),
-                "pct":  float(d.get("pctChange", 0)),
-                "name": d.get("name", f"{base}/{quote}"),
-            }
+        rates = _get_er_rates()
+        # Converte via USD: base/quote = rates[quote] / rates[base]
+        base_usd  = float(rates.get(base, 0))
+        quote_usd = float(rates.get(quote, 0))
+        if not base_usd or not quote_usd:
+            return None
+        bid = round(quote_usd / base_usd, 4)
+        return {
+            "bid":  bid,
+            "ask":  bid,
+            "high": bid,
+            "low":  bid,
+            "pct":  0.0,
+            "name": f"{base}/{quote}",
+        }
     except Exception:
         return None
 
