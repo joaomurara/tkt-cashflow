@@ -1,5 +1,6 @@
 """
 Página Relatório PDF — One-pager executivo com indicadores e FUP Vendas.
+Usa canvas com posicionamento absoluto para layout 100% previsível.
 """
 
 import io
@@ -18,11 +19,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.platypus import (
-    BaseDocTemplate, Frame, PageTemplate,
-    Paragraph, Spacer, Table, TableStyle,
-    HRFlowable, KeepInFrame,
-)
+from reportlab.platypus import Table, TableStyle, Paragraph
+from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 # ── Paleta ───────────────────────────────────────────────────────────────────
@@ -35,99 +33,118 @@ CINZA     = colors.HexColor("#F2F4F7")
 CINZA_TXT = colors.HexColor("#666666")
 BRANCO    = colors.white
 
-W, H = A4
-MARGEM  = 12 * mm
-LARGURA = W - 2 * MARGEM   # largura útil
-COL_L   = LARGURA * 0.52   # coluna esquerda
-COL_R   = LARGURA * 0.48   # coluna direita
-GAP     = 3 * mm
+W_PG, H_PG = A4
+MARG   = 12 * mm
+LARG   = W_PG - 2 * MARG          # largura útil total
+COL_L  = LARG * 0.52              # coluna esquerda
+COL_R  = LARG * 0.48              # coluna direita
+SEP    = 4 * mm                   # espaço entre colunas
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ESTILOS
+# ESTILOS DE PARÁGRAFO
 # ─────────────────────────────────────────────────────────────────────────────
-def _S():
-    return {
-        "titulo":  ParagraphStyle("tit",  fontSize=17, textColor=AZUL_ESC,
-                                  fontName="Helvetica-Bold", leading=20),
-        "sub":     ParagraphStyle("sub",  fontSize=8,  textColor=CINZA_TXT,
-                                  fontName="Helvetica", alignment=TA_RIGHT),
-        "sec":     ParagraphStyle("sec",  fontSize=7.5, textColor=BRANCO,
-                                  fontName="Helvetica-Bold", leading=10),
-        "lbl":     ParagraphStyle("lbl",  fontSize=6.5, textColor=CINZA_TXT,
-                                  fontName="Helvetica", leading=8),
-        "val":     ParagraphStyle("val",  fontSize=9,  textColor=AZUL_ESC,
-                                  fontName="Helvetica-Bold", leading=11),
-        "val_p":   ParagraphStyle("valp", fontSize=9,  textColor=VERDE,
-                                  fontName="Helvetica-Bold", leading=11),
-        "val_n":   ParagraphStyle("valn", fontSize=9,  textColor=VERMELHO,
-                                  fontName="Helvetica-Bold", leading=11),
-        "cel":     ParagraphStyle("cel",  fontSize=6.5, textColor=AZUL_ESC,
-                                  fontName="Helvetica", leading=8),
-        "rod":     ParagraphStyle("rod",  fontSize=6,  textColor=CINZA_TXT,
-                                  fontName="Helvetica", alignment=TA_CENTER),
-    }
+def _ps(name, size, color, bold=False, align=TA_LEFT, leading=None):
+    return ParagraphStyle(
+        name,
+        fontSize=size,
+        textColor=color,
+        fontName="Helvetica-Bold" if bold else "Helvetica",
+        alignment=align,
+        leading=leading or size * 1.3,
+    )
+
+S_SEC  = _ps("sec",  7.5, BRANCO,    bold=True)
+S_LBL  = _ps("lbl",  6.5, CINZA_TXT)
+S_VAL  = _ps("val",  9.0, AZUL_ESC,  bold=True)
+S_VALP = _ps("valp", 9.0, VERDE,     bold=True)
+S_VALN = _ps("valn", 9.0, VERMELHO,  bold=True)
+S_CEL  = _ps("cel",  6.5, AZUL_ESC)
+S_ROD  = _ps("rod",  6.0, CINZA_TXT, align=TA_CENTER)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
+# FORMATAÇÃO DE VALORES
 # ─────────────────────────────────────────────────────────────────────────────
 def _brl(v: float) -> str:
     return f"R$ {v:,.2f}"
 
-
-def _brl_k(v: float) -> str:
-    """Formato compacto para valores grandes em KPIs (evita quebra de linha)."""
+def _brlk(v: float) -> str:
+    """Compacto para KPIs — evita quebra de linha."""
     av = abs(v)
-    sinal = "-" if v < 0 else ""
+    s  = "-" if v < 0 else ""
     if av >= 1_000_000:
-        return f"{sinal}R$ {av/1_000_000:,.2f}M"
+        return f"{s}R$ {av/1_000_000:,.2f}M"
     if av >= 1_000:
-        return f"{sinal}R$ {av/1_000:,.1f}K"
-    return f"{sinal}R$ {av:,.2f}"
+        return f"{s}R$ {av/1_000:,.1f}K"
+    return f"{s}R$ {av:,.2f}"
 
 
-def _bloco_sec(texto: str, S: dict, largura: float) -> Table:
-    """Faixa de título de seção — usa a largura da coluna correta."""
-    t = Table([[Paragraph(texto.upper(), S["sec"])]], colWidths=[largura])
-    t.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1), AZUL_MED),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
-        ("TOPPADDING",    (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    return t
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIMITIVOS DE DESENHO
+# ─────────────────────────────────────────────────────────────────────────────
+def _draw_table(c, tbl: Table, x: float, y: float, w: float):
+    """Envolve e desenha uma Table Platypus em coordenadas absolutas."""
+    tbl.wrapOn(c, w, 9999)
+    tbl.drawOn(c, x, y - tbl._height)
+    return tbl._height
 
 
-def _kpi(kpis: list, S: dict, largura: float) -> Table:
+def _sec_header(c, x: float, y: float, w: float, texto: str) -> float:
+    """Faixa azul de título de seção. Retorna a altura consumida."""
+    h = 8 * mm
+    c.setFillColor(AZUL_MED)
+    c.roundRect(x, y - h, w, h, 2, fill=1, stroke=0)
+    p = Paragraph(texto.upper(), S_SEC)
+    pw, ph = p.wrapOn(c, w - 8, h)
+    p.drawOn(c, x + 6, y - h + (h - ph) / 2)
+    return h + 2
+
+
+def _kpi_block(c, x: float, y: float, w: float,
+               kpis: list) -> float:
     """
-    kpis = [(label, valor, cor)]  cor: 'p'=verde, 'n'=vermelho, None=azul
+    Bloco de KPIs lado a lado sobre fundo cinza.
+    kpis = [(label, valor, cor)]  cor: 'p'|'n'|None
+    Retorna altura consumida.
     """
     n  = len(kpis)
-    cw = largura / n
-    row_lbl = []
-    row_val = []
-    for label, valor, cor in kpis:
-        row_lbl.append(Paragraph(label, S["lbl"]))
-        st_val = S["val_p"] if cor == "p" else S["val_n"] if cor == "n" else S["val"]
-        row_val.append(Paragraph(valor, st_val))
+    cw = w / n
+    h  = 14 * mm
 
-    t = Table([row_lbl, row_val], colWidths=[cw] * n)
-    t.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1), CINZA),
-        ("TOPPADDING",    (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 5),
-        ("LINEAFTER",     (0, 0), (-2, -1), 0.4, colors.HexColor("#C8D8E8")),
-    ]))
-    return t
+    # fundo
+    c.setFillColor(CINZA)
+    c.roundRect(x, y - h, w, h, 2, fill=1, stroke=0)
+
+    # linhas divisórias
+    c.setStrokeColor(colors.HexColor("#C8D8E8"))
+    c.setLineWidth(0.4)
+    for i in range(1, n):
+        lx = x + cw * i
+        c.line(lx, y - h + 3, lx, y - 3)
+
+    # textos
+    for i, (label, valor, cor) in enumerate(kpis):
+        cx = x + cw * i
+        # label
+        pl = Paragraph(label, S_LBL)
+        plw, plh = pl.wrapOn(c, cw - 6, 20)
+        pl.drawOn(c, cx + 4, y - 5 - plh)
+        # valor
+        sv = S_VALP if cor == "p" else S_VALN if cor == "n" else S_VAL
+        pv = Paragraph(valor, sv)
+        pvw, pvh = pv.wrapOn(c, cw - 6, 20)
+        pv.drawOn(c, cx + 4, y - h + 2)
+
+    return h + 3
 
 
-def _tabela(cab: list, rows: list, cws: list, S: dict, zebra=True) -> Table:
+def _data_table(c, x: float, y: float, w: float,
+                cab: list, rows: list, cws: list,
+                zebra: bool = True) -> float:
+    """Tabela de dados com cabeçalho azul escuro."""
     data = [cab] + rows
-    t = Table(data, colWidths=cws, repeatRows=1)
+    tbl  = Table(data, colWidths=cws, repeatRows=1)
     estilo = [
         ("BACKGROUND",    (0, 0), (-1, 0),  AZUL_ESC),
         ("TEXTCOLOR",     (0, 0), (-1, 0),  BRANCO),
@@ -136,182 +153,147 @@ def _tabela(cab: list, rows: list, cws: list, S: dict, zebra=True) -> Table:
         ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
         ("LEFTPADDING",   (0, 0), (-1, -1), 4),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
-        ("TOPPADDING",    (0, 0), (-1, -1), 2.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING",    (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ("GRID",          (0, 0), (-1, -1), 0.3, colors.HexColor("#C5D3E0")),
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
     ]
     if zebra:
         for i in range(2, len(data), 2):
             estilo.append(("BACKGROUND", (0, i), (-1, i), AZUL_CLR))
-    t.setStyle(TableStyle(estilo))
-    return t
-
-
-def _sp(h=4) -> Spacer:
-    return Spacer(1, h)
+    tbl.setStyle(TableStyle(estilo))
+    return _draw_table(c, tbl, x, y, w)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CONTEÚDO DAS COLUNAS
+# COLUNA ESQUERDA
 # ─────────────────────────────────────────────────────────────────────────────
-def _col_esquerda(S, posicao, saldos, cambios_disp, pos_30, pos_60, pos_90,
-                  total_rec, total_obr, total_imp) -> list:
-    W_L = COL_L - GAP / 2
-    story = []
+def _col_esquerda(c, x, y_start, posicao, saldos, cambios_disp,
+                  pos_30, pos_60, pos_90, total_rec, total_obr, total_imp):
+    w = COL_L - SEP / 2
+    y = y_start
 
-    # ── Posição consolidada ───────────────────────────────────────────────
-    story.append(_bloco_sec("Posição Consolidada", S, W_L))
-    story.append(_sp(3))
-    story.append(_kpi([
-        ("Caixa BRL",           _brl_k(posicao["total_bancos"]),      None),
-        ("Câmbios a Receber",   _brl_k(posicao["total_cambios_brl"]), None),
-        ("Posição Consolidada", _brl_k(posicao["total"]),
+    # Posição consolidada
+    y -= _sec_header(c, x, y, w, "Posição Consolidada")
+    y -= _kpi_block(c, x, y, w, [
+        ("Caixa BRL",           _brlk(posicao["total_bancos"]),      None),
+        ("Câmbios a Receber",   _brlk(posicao["total_cambios_brl"]), None),
+        ("Posição Consolidada", _brlk(posicao["total"]),
          "p" if posicao["total"] >= 0 else "n"),
-    ], S, W_L))
-    story.append(_sp(6))
+    ])
 
-    # ── Projeção 30 / 60 / 90 dias ───────────────────────────────────────
-    story.append(_bloco_sec("Projeção de Caixa — base: posição consolidada", S, W_L))
-    story.append(_sp(3))
-    story.append(_kpi([
-        ("30 dias", _brl_k(pos_30), "p" if pos_30 >= 0 else "n"),
-        ("60 dias", _brl_k(pos_60), "p" if pos_60 >= 0 else "n"),
-        ("90 dias", _brl_k(pos_90), "p" if pos_90 >= 0 else "n"),
-    ], S, W_L))
-    story.append(_sp(6))
+    # Projeção 30/60/90 dias
+    y -= _sec_header(c, x, y, w, "Projeção de Caixa — base: posição consolidada")
+    y -= _kpi_block(c, x, y, w, [
+        ("30 dias", _brlk(pos_30), "p" if pos_30 >= 0 else "n"),
+        ("60 dias", _brlk(pos_60), "p" if pos_60 >= 0 else "n"),
+        ("90 dias", _brlk(pos_90), "p" if pos_90 >= 0 else "n"),
+    ])
 
-    # ── Recebíveis e obrigações ───────────────────────────────────────────
-    story.append(_bloco_sec(f"Recebíveis e Obrigações — {date.today().year}", S, W_L))
-    story.append(_sp(3))
+    # Recebíveis e obrigações
     saldo_proj = posicao["total"] + total_rec + total_obr
-    story.append(_kpi([
-        ("Recebíveis",      _brl_k(total_rec),       "p"),
-        ("Obrigações",      _brl_k(abs(total_obr)),   "n"),
-        ("Saldo Projetado", _brl_k(saldo_proj),
+    y -= _sec_header(c, x, y, w, f"Recebíveis e Obrigações — {date.today().year}")
+    y -= _kpi_block(c, x, y, w, [
+        ("Recebíveis",      _brlk(total_rec),       "p"),
+        ("Obrigações",      _brlk(abs(total_obr)),   "n"),
+        ("Saldo Projetado", _brlk(saldo_proj),
          "p" if saldo_proj >= 0 else "n"),
-        ("Impostos",        _brl_k(abs(total_imp)),   "n"),
-    ], S, W_L))
-    story.append(_sp(6))
+        ("Impostos",        _brlk(abs(total_imp)),   "n"),
+    ])
 
-    # ── Saldos bancários ──────────────────────────────────────────────────
-    story.append(_bloco_sec("Saldos Bancários", S, W_L))
-    story.append(_sp(3))
+    # Saldos bancários
+    y -= _sec_header(c, x, y, w, "Saldos Bancários")
     if saldos:
-        rows_sb = [[r["banco"],
-                    r.get("tipo") or "C/C",
-                    _brl(r["saldo"] or 0),
-                    str(r["data"])] for r in saldos]
-        story.append(_tabela(
-            ["Banco / Conta", "Tipo", "Saldo", "Data"],
-            rows_sb,
-            [W_L * 0.37, W_L * 0.22, W_L * 0.24, W_L * 0.17],
-            S,
-        ))
+        cws = [w * 0.36, w * 0.22, w * 0.25, w * 0.17]
+        rows = [[r["banco"], r.get("tipo") or "C/C",
+                 _brl(r["saldo"] or 0), str(r["data"])] for r in saldos]
+        y -= _data_table(c, x, y, w,
+                         ["Banco / Conta", "Tipo", "Saldo", "Data"],
+                         rows, cws) + 3
     else:
-        story.append(Paragraph("Nenhum saldo cadastrado.", S["lbl"]))
-    story.append(_sp(6))
+        y -= 5 * mm
 
-    # ── Câmbios disponíveis ───────────────────────────────────────────────
-    story.append(_bloco_sec("Câmbios Disponíveis", S, W_L))
-    story.append(_sp(3))
+    # Câmbios disponíveis
+    y -= _sec_header(c, x, y, w, "Câmbios Disponíveis")
     if cambios_disp:
         ptax = posicao.get("ptax_map", {})
-        rows_cx = []
-        for c in cambios_disp[:7]:
-            taxa = ptax.get(c["moeda"])
-            brl_proj = _brl((c["valor_me"] or 0) * taxa) if taxa else "—"
-            rows_cx.append([
-                (c.get("descricao") or c.get("razao_social") or "—")[:22],
-                f"{c['valor_me']:,.0f} {c['moeda']}",
-                brl_proj,
-                str(c.get("data_entrada") or "—"),
-            ])
-        story.append(_tabela(
-            ["Descrição", "Valor ME", "BRL Proj.", "Entrada"],
-            rows_cx,
-            [W_L * 0.34, W_L * 0.22, W_L * 0.26, W_L * 0.18],
-            S,
-        ))
-        if len(cambios_disp) > 7:
-            story.append(Paragraph(
-                f"+ {len(cambios_disp) - 7} posição(ões) não exibida(s).", S["lbl"]))
-    else:
-        story.append(Paragraph("Nenhum câmbio disponível.", S["lbl"]))
+        cws  = [w * 0.33, w * 0.22, w * 0.27, w * 0.18]
+        rows = []
+        for cv in cambios_disp[:8]:
+            taxa     = ptax.get(cv["moeda"])
+            brl_proj = _brl((cv["valor_me"] or 0) * taxa) if taxa else "—"
+            nome     = (cv.get("descricao") or cv.get("razao_social") or "—")[:20]
+            rows.append([nome,
+                         f"{cv['valor_me']:,.0f} {cv['moeda']}",
+                         brl_proj,
+                         str(cv.get("data_entrada") or "—")])
+        y -= _data_table(c, x, y, w,
+                         ["Descrição", "Valor ME", "BRL Proj.", "Entrada"],
+                         rows, cws) + 2
+        if len(cambios_disp) > 8:
+            p = Paragraph(f"+ {len(cambios_disp)-8} posição(ões) não exibida(s).", S_LBL)
+            pw, ph = p.wrapOn(c, w, 20)
+            p.drawOn(c, x, y - ph)
+            y -= ph + 2
 
-    return story
+    return y
 
 
-def _col_direita(S, val_alta, val_media, val_baixa, total_fup, n_deals,
-                 top_deals, por_mes) -> list:
-    W_R = COL_R - GAP / 2
-    story = []
+# ─────────────────────────────────────────────────────────────────────────────
+# COLUNA DIREITA
+# ─────────────────────────────────────────────────────────────────────────────
+def _col_direita(c, x, y_start, val_alta, val_media, val_baixa,
+                 total_fup, n_deals, top_deals, por_mes):
+    w = COL_R - SEP / 2
+    y = y_start
 
-    # ── Pipeline FUP ─────────────────────────────────────────────────────
-    story.append(_bloco_sec("FUP Vendas — Pipeline", S, W_R))
-    story.append(_sp(3))
-    story.append(_kpi([
-        ("ALTA",  _brl_k(val_alta),  "p"),
-        ("MEDIA", _brl_k(val_media), None),
-        ("BAIXA", _brl_k(val_baixa), None),
-    ], S, W_R))
-    story.append(_sp(3))
-    story.append(_kpi([
-        ("Total no Pipeline", _brl_k(total_fup),
+    # Pipeline FUP
+    y -= _sec_header(c, x, y, w, "FUP Vendas — Pipeline")
+    y -= _kpi_block(c, x, y, w, [
+        ("ALTA",  _brlk(val_alta),  "p" if val_alta > 0 else None),
+        ("MEDIA", _brlk(val_media), None),
+        ("BAIXA", _brlk(val_baixa), None),
+    ])
+    y -= _kpi_block(c, x, y, w, [
+        ("Total no Pipeline", _brlk(total_fup),
          "p" if total_fup > 0 else None),
         ("Negócios ativos", str(n_deals), None),
-    ], S, W_R))
-    story.append(_sp(6))
+    ])
 
-    # ── Top negócios ──────────────────────────────────────────────────────
-    story.append(_bloco_sec("Principais Negócios (ALTA + MEDIA)", S, W_R))
-    story.append(_sp(3))
+    # Principais negócios
+    y -= _sec_header(c, x, y, w, "Principais Negócios (ALTA + MEDIA)")
     if top_deals:
-        rows_deal = []
+        cws  = [w * 0.45, w * 0.13, w * 0.32, w * 0.10]
+        rows = []
         for d in top_deals:
-            nome = d["razao"]
-            if len(nome) > 26:
-                nome = nome[:25] + "…"
-            rows_deal.append([
-                nome,
-                d["prob"],
-                _brl(d["valor"]),
-                str(d["parcelas"]),
-            ])
-        story.append(_tabela(
-            ["Negócio", "Prob.", "Valor BRL", "Parc."],
-            rows_deal,
-            [W_R * 0.44, W_R * 0.13, W_R * 0.33, W_R * 0.10],
-            S,
-        ))
+            nome = d["razao"][:26] + "…" if len(d["razao"]) > 26 else d["razao"]
+            rows.append([nome, d["prob"], _brl(d["valor"]), str(d["parcelas"])])
+        y -= _data_table(c, x, y, w,
+                         ["Negócio", "Prob.", "Valor BRL", "Parc."],
+                         rows, cws) + 3
     else:
-        story.append(Paragraph("Nenhum negócio ALTA ou MEDIA.", S["lbl"]))
-    story.append(_sp(6))
+        y -= 5 * mm
 
-    # ── Recebimentos por mês ──────────────────────────────────────────────
-    story.append(_bloco_sec("Recebimentos Esperados por Mês (ALTA + MEDIA)", S, W_R))
-    story.append(_sp(3))
+    # Recebimentos por mês
+    y -= _sec_header(c, x, y, w, "Recebimentos Esperados por Mês (ALTA + MEDIA)")
     if por_mes:
-        meses = sorted(por_mes.keys())[:8]
-        rows_mes = [[m, _brl(por_mes[m])] for m in meses]
-        story.append(_tabela(
-            ["Mês", "Valor Esperado"],
-            rows_mes,
-            [W_R * 0.38, W_R * 0.62],
-            S,
-        ))
+        meses = sorted(por_mes.keys())[:9]
+        cws   = [w * 0.35, w * 0.65]
+        rows  = [[m, _brl(por_mes[m])] for m in meses]
+        y -= _data_table(c, x, y, w,
+                         ["Mês", "Valor Esperado"],
+                         rows, cws) + 3
     else:
-        story.append(Paragraph("Sem dados de vencimento no FUP.", S["lbl"]))
+        y -= 5 * mm
 
-    return story
+    return y
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GERAÇÃO DO PDF
 # ─────────────────────────────────────────────────────────────────────────────
 def _gerar_pdf(usuario: str) -> bytes:
-    buf = io.BytesIO()
-    S   = _S()
+    buf  = io.BytesIO()
     hoje = date.today()
 
     # ── Dados ────────────────────────────────────────────────────────────
@@ -343,118 +325,96 @@ def _gerar_pdf(usuario: str) -> bytes:
     fup_media  = db.listar_fup(dt_ini=dt_ini_fup, dt_fim=dt_fim_ano, prob="MEDIA")
     fup_baixa  = db.listar_fup(dt_ini=dt_ini_fup, dt_fim=dt_fim_ano, prob="BAIXA")
 
-    def _sum_fup(linhas):
+    def _sv(linhas):
         return sum(r.get("valor_brl") or r.get("valor") or 0 for r in linhas)
 
-    val_alta  = _sum_fup(fup_alta)
-    val_media = _sum_fup(fup_media)
-    val_baixa = _sum_fup(fup_baixa)
+    val_alta  = _sv(fup_alta)
+    val_media = _sv(fup_media)
+    val_baixa = _sv(fup_baixa)
     total_fup = val_alta + val_media + val_baixa
 
     deal_map = defaultdict(lambda: {"razao": "", "valor": 0.0, "prob": "", "parcelas": 0})
-    for linha in fup_alta + fup_media:
-        did = linha.get("deal_id", "")
-        deal_map[did]["razao"]     = linha.get("razao_social") or linha.get("descricao") or did
-        deal_map[did]["valor"]    += linha.get("valor_brl") or linha.get("valor") or 0
-        deal_map[did]["prob"]      = linha.get("probabilidade", "")
+    for ln in fup_alta + fup_media:
+        did = ln.get("deal_id", "")
+        deal_map[did]["razao"]     = ln.get("razao_social") or ln.get("descricao") or did
+        deal_map[did]["valor"]    += ln.get("valor_brl") or ln.get("valor") or 0
+        deal_map[did]["prob"]      = ln.get("probabilidade", "")
         deal_map[did]["parcelas"] += 1
 
-    top_deals = sorted(deal_map.values(), key=lambda x: -x["valor"])[:8]
+    top_deals = sorted(deal_map.values(), key=lambda d: -d["valor"])[:8]
     n_deals   = len({r.get("deal_id") for r in fup_alta + fup_media + fup_baixa})
 
     por_mes: dict = defaultdict(float)
-    for linha in fup_alta + fup_media:
-        venc = str(linha.get("vencimento") or "")[:7]
-        por_mes[venc] += linha.get("valor_brl") or linha.get("valor") or 0
+    for ln in fup_alta + fup_media:
+        venc = str(ln.get("vencimento") or "")[:7]
+        por_mes[venc] += ln.get("valor_brl") or ln.get("valor") or 0
 
-    # ── Monta o documento ────────────────────────────────────────────────
-    ALTURA_UTIL = H - 2 * MARGEM
+    # ── Canvas ───────────────────────────────────────────────────────────
+    c = rl_canvas.Canvas(buf, pagesize=A4)
 
-    def _on_page(canvas, doc):
-        canvas.saveState()
-        canvas.setStrokeColor(colors.HexColor("#BFD0E0"))
-        canvas.setLineWidth(0.5)
-        canvas.rect(MARGEM - 3, MARGEM - 3,
-                    W - 2 * MARGEM + 6, H - 2 * MARGEM + 6)
-        canvas.restoreState()
-
-    frame = Frame(MARGEM, MARGEM, LARGURA, ALTURA_UTIL,
-                  leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-    tmpl  = PageTemplate(id="main", frames=[frame], onPage=_on_page)
-    doc   = BaseDocTemplate(buf, pagesize=A4, pageTemplates=[tmpl],
-                            leftMargin=MARGEM, rightMargin=MARGEM,
-                            topMargin=MARGEM,  bottomMargin=MARGEM)
-
-    story = []
+    # Borda da página
+    c.setStrokeColor(colors.HexColor("#BFD0E0"))
+    c.setLineWidth(0.5)
+    c.rect(MARG - 3, MARG - 3, W_PG - 2*MARG + 6, H_PG - 2*MARG + 6)
 
     # ── CABEÇALHO ────────────────────────────────────────────────────────
+    y_top = H_PG - MARG
+
     logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logo_tecnotok.png")
     if os.path.exists(logo_path):
-        from reportlab.platypus import Image as RLImage
-        logo = RLImage(logo_path, width=26 * mm, height=11 * mm, kind="proportional")
-        cab_data = [[logo,
-                     Paragraph("TKT Cash Flow", S["titulo"]),
-                     Paragraph(
-                         f"Relatório Executivo<br/>{hoje.strftime('%d/%m/%Y')}",
-                         S["sub"])]]
-        cab_cw = [28 * mm, LARGURA - 75 * mm, 47 * mm]
+        c.drawImage(logo_path, MARG, y_top - 12*mm,
+                    width=26*mm, height=12*mm, preserveAspectRatio=True, mask="auto")
+        x_titulo = MARG + 28*mm
     else:
-        cab_data = [[Paragraph("TKT Cash Flow", S["titulo"]),
-                     Paragraph(
-                         f"Relatório Executivo<br/>{hoje.strftime('%d/%m/%Y')}",
-                         S["sub"])]]
-        cab_cw = [LARGURA - 50 * mm, 50 * mm]
+        x_titulo = MARG
 
-    cab_t = Table(cab_data, colWidths=cab_cw)
-    cab_t.setStyle(TableStyle([
-        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
-        ("TOPPADDING",    (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    story.append(cab_t)
-    story.append(HRFlowable(width=LARGURA, thickness=1.5,
-                             color=AZUL_MED, spaceAfter=5))
+    c.setFont("Helvetica-Bold", 17)
+    c.setFillColor(AZUL_ESC)
+    c.drawString(x_titulo, y_top - 10*mm, "TKT Cash Flow")
 
-    # ── CORPO: duas colunas ───────────────────────────────────────────────
-    # Altura disponível = total - cabeçalho (~22pt) - hr (~7pt) - rodapé (~14pt)
-    ALTURA_COL = ALTURA_UTIL - 44
+    c.setFont("Helvetica", 8)
+    c.setFillColor(CINZA_TXT)
+    data_str = f"Relatório Executivo  ·  {hoje.strftime('%d/%m/%Y')}"
+    c.drawRightString(MARG + LARG, y_top - 6*mm, data_str)
 
-    left  = _col_esquerda(S, posicao, saldos, cambios_disp,
-                          pos_30, pos_60, pos_90,
-                          total_rec, total_obr, total_imp)
-    right = _col_direita(S, val_alta, val_media, val_baixa,
-                         total_fup, n_deals, top_deals, por_mes)
+    # Linha separadora
+    y_top -= 14*mm
+    c.setStrokeColor(AZUL_MED)
+    c.setLineWidth(1.5)
+    c.line(MARG, y_top, MARG + LARG, y_top)
+    y_top -= 4*mm
 
-    corpo = Table(
-        [[KeepInFrame(COL_L - GAP / 2, ALTURA_COL, left,  mode="shrink"),
-          KeepInFrame(COL_R - GAP / 2, ALTURA_COL, right, mode="shrink")]],
-        colWidths=[COL_L, COL_R],
-    )
-    corpo.setStyle(TableStyle([
-        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
-        ("TOPPADDING",    (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-        ("LINEAFTER",     (0, 0), (0, -1),  0.5, colors.HexColor("#C5D3E0")),
-        ("RIGHTPADDING",  (0, 0), (0, -1),  int(GAP)),
-        ("LEFTPADDING",   (1, 0), (1, -1),  int(GAP)),
-    ]))
-    story.append(corpo)
+    # ── LINHA SEPARADORA ENTRE COLUNAS ───────────────────────────────────
+    # Desenhada depois do conteúdo (altura dinâmica)
+    x_L = MARG
+    x_R = MARG + COL_L + SEP / 2
+
+    # ── CONTEÚDO ─────────────────────────────────────────────────────────
+    y_end_L = _col_esquerda(c, x_L, y_top, posicao, saldos, cambios_disp,
+                             pos_30, pos_60, pos_90, total_rec, total_obr, total_imp)
+    y_end_R = _col_direita(c, x_R, y_top, val_alta, val_media, val_baixa,
+                            total_fup, n_deals, top_deals, por_mes)
+
+    # Linha vertical entre colunas
+    y_col_bottom = min(y_end_L, y_end_R) - 2*mm
+    c.setStrokeColor(colors.HexColor("#C5D3E0"))
+    c.setLineWidth(0.5)
+    c.line(MARG + COL_L, y_top, MARG + COL_L, y_col_bottom)
 
     # ── RODAPÉ ───────────────────────────────────────────────────────────
-    story.append(HRFlowable(width=LARGURA, thickness=0.4,
-                             color=AZUL_CLR, spaceBefore=4, spaceAfter=2))
-    story.append(Paragraph(
-        f"Gerado em {hoje.strftime('%d/%m/%Y')} por {usuario}  ·  "
-        f"TKT Cash Flow  ·  Tecnotok © {hoje.year}  ·  "
-        "Documento confidencial — uso interno",
-        S["rod"],
-    ))
+    y_rod = MARG + 4*mm
+    c.setStrokeColor(AZUL_CLR)
+    c.setLineWidth(0.4)
+    c.line(MARG, y_rod + 3*mm, MARG + LARG, y_rod + 3*mm)
 
-    doc.build(story)
+    c.setFont("Helvetica", 6)
+    c.setFillColor(CINZA_TXT)
+    rodape = (f"Gerado em {hoje.strftime('%d/%m/%Y')} por {usuario}  ·  "
+              f"TKT Cash Flow  ·  Tecnotok © {hoje.year}  ·  "
+              "Documento confidencial — uso interno")
+    c.drawCentredString(MARG + LARG / 2, y_rod, rodape)
+
+    c.save()
     buf.seek(0)
     return buf.read()
 
@@ -466,7 +426,7 @@ def render():
     st.title("📄 Relatório Executivo — PDF")
     st.markdown(
         "Gera um **one-pager A4** com os principais indicadores de caixa "
-        "e o pipeline de vendas (FUP). Pronto para impressão ou envio por e-mail."
+        "e o pipeline de vendas. Pronto para impressão ou envio por e-mail."
     )
 
     hoje    = date.today()
@@ -476,14 +436,14 @@ def render():
         st.markdown("""
         **Coluna esquerda — Indicadores de Caixa**
         - Posição consolidada: caixa BRL + câmbios a receber (PTAX)
-        - Projeção 30, 60 e 90 dias (cenário ALTA)
+        - Projeção 30, 60 e 90 dias
         - Recebíveis, obrigações e impostos do ano
         - Saldos bancários por conta
         - Câmbios disponíveis com BRL projetado
 
         **Coluna direita — FUP Vendas**
-        - Pipeline total por probabilidade (ALTA / MEDIA / BAIXA)
-        - Top 8 negócios ALTA + MEDIA com valor
+        - Pipeline por probabilidade (ALTA / MEDIA / BAIXA)
+        - Top 8 negócios ALTA + MEDIA
         - Recebimentos esperados mês a mês
         """)
 
