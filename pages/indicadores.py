@@ -53,14 +53,21 @@ def render():
     # ─── PROJEÇÃO 2 SEMANAS (10 DIAS ÚTEIS) ──────────────────────────────
     st.subheader("📆 Projeção — Próximos 10 Dias Úteis")
 
-    # Base date: data do saldo mais recente (ou hoje)
+    # Base date: data do saldo mais recente (ou hoje) como padrão
     if saldos:
         try:
-            base_date = date.fromisoformat(saldos[0]["data"])
+            default_base = date.fromisoformat(saldos[0]["data"])
         except Exception:
-            base_date = hoje
+            default_base = hoje
     else:
-        base_date = hoje
+        default_base = hoje
+
+    base_date = st.date_input(
+        "📅 Data base da projeção",
+        value=default_base,
+        key="proj2s_base_date",
+        help="Os 10 dias úteis serão contados a partir desta data.",
+    )
 
     # Gera os 10 próximos dias úteis a partir de base_date
     def _proximos_uteis(start: date, n: int):
@@ -122,10 +129,7 @@ def render():
     df_show_proj["Saldo do Dia"]    = df_show_proj["Saldo do Dia"].apply(_fmt)
     df_show_proj["Saldo Acumulado"] = df_show_proj["Saldo Acumulado"].apply(lambda x: _fmt(x, color=True))
 
-    if base_date != hoje:
-        st.caption(f"Base: saldo bancário em {base_date.strftime('%d/%m/%Y')} — R$ {total_bancos:,.2f}")
-    else:
-        st.caption(f"Base: saldo bancário atual — R$ {total_bancos:,.2f}")
+    st.caption(f"Base: {base_date.strftime('%d/%m/%Y')} — saldo bancário R$ {total_bancos:,.2f}")
 
     st.dataframe(df_show_proj, use_container_width=True, hide_index=True)
 
