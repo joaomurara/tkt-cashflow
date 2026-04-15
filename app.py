@@ -128,7 +128,48 @@ with st.sidebar:
     if "pagina" not in st.session_state:
         st.session_state.pagina = "home"
 
-    for label, key in PAGINAS.items():
+    # ── Início ───────────────────────────────────────────────────────────
+    if st.button("🏠 Início", key="nav_home"):
+        st.session_state.pagina = "home"
+
+    # ── Dados ─────────────────────────────────────────────────────────────
+    st.caption("— Dados —")
+    for label, key in [
+        ("📂 DATABASE / ERP", "database_erp"),
+        ("📝 Provisões",      "provisoes"),
+        ("📡 FUP Vendas",     "fup_vendas"),
+    ]:
+        if st.button(label, key=f"nav_{key}"):
+            st.session_state.pagina = key
+
+    # ── Fluxo de Caixa ────────────────────────────────────────────────────
+    st.caption("— Fluxo de Caixa —")
+    for label, key in [
+        ("📅 FC Diário",   "fc_diario"),
+        ("📊 FC Resumo",   "fc_resumo"),
+        ("📉 Gráfico",     "grafico"),
+        ("📉 Recebíveis VP", "recebiveis_vp"),
+    ]:
+        if st.button(label, key=f"nav_{key}"):
+            st.session_state.pagina = key
+
+    # ── Gestão ────────────────────────────────────────────────────────────
+    st.caption("— Gestão —")
+    for label, key in [
+        ("📈 Indicadores", "indicadores"),
+        ("💱 Câmbios",     "cambios"),
+    ]:
+        if st.button(label, key=f"nav_{key}"):
+            st.session_state.pagina = key
+
+    # ── Ferramentas ───────────────────────────────────────────────────────
+    st.caption("— Ferramentas —")
+    for label, key in [
+        ("🧮 Simulação de Venda",  "simulacao"),
+        ("📡 Terminal Financeiro", "terminal_financeiro"),
+        ("📸 Snapshots",           "snapshots"),
+        ("📄 Relatório PDF",       "relatorio_pdf"),
+    ]:
         if st.button(label, key=f"nav_{key}"):
             st.session_state.pagina = key
 
