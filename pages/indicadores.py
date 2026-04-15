@@ -75,16 +75,17 @@ def render():
 
     total_consolidado = total_bancos + total_cambios_brl
 
-    # Métricas resumo — contas bancárias
+    # Tabela de contas bancárias
     if saldos:
-        cols_banco = st.columns(min(len(saldos), 4))
-        for i, r in enumerate(saldos):
-            tipo_label = r.get("tipo") or "Conta Corrente"
-            cols_banco[i % 4].metric(
-                f"{r['banco']} · {tipo_label}",
-                f"R$ {r['saldo']:,.2f}",
-                f"em {r['data']}"
-            )
+        df_saldos = pd.DataFrame([{
+            "Banco / Conta": r["banco"],
+            "Tipo":          r.get("tipo") or "Conta Corrente",
+            "Saldo (R$)":   r["saldo"] or 0.0,
+            "Data":          r["data"],
+        } for r in saldos])
+        df_saldos_show = df_saldos.copy()
+        df_saldos_show["Saldo (R$)"] = df_saldos_show["Saldo (R$)"].apply(lambda x: f"R$ {x:,.2f}")
+        st.dataframe(df_saldos_show, use_container_width=True, hide_index=True)
     else:
         st.info("Nenhum saldo cadastrado. Adicione uma conta abaixo.")
 
