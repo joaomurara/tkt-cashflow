@@ -26,38 +26,21 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Câmbio ────────────────────────────────────────────────────────────────────
-import time as _time
-_er_rates_cache: dict = {}
-_er_rates_ts: float = 0.0
-_ER_URLS = [
-    "https://latest.currency-api.pages.dev/v1/currencies/usd.json",
-    "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
-]
-
+@st.cache_data(ttl=3600, show_spinner=False)
 def _get_er_rates() -> dict:
-    """Busca taxas USD-base via CDN Cloudflare (sem rate limit, cache 1h)."""
-    global _er_rates_cache, _er_rates_ts
-    if _er_rates_cache and (_time.time() - _er_rates_ts) < 3600:
-        return _er_rates_cache
-    for url in _ER_URLS:
-        try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            rates = r.json().get("usd", {})  # chaves em minúsculo
-            if rates:
-                _er_rates_cache = rates
-                _er_rates_ts = _time.time()
-                return _er_rates_cache
-        except Exception:
-            continue
-    return _er_rates_cache
+    """Busca taxas USD-base via open.er-api.com. Cache Streamlit de 1h."""
+    try:
+        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=15)
+        r.raise_for_status()
+        return r.json().get("rates", {})  # chaves em MAIÚSCULO: {"USD":1, "BRL":5.7, ...}
+    except Exception:
+        return {}
 
 def get_pair_rate(base, quote):
     try:
         rates = _get_er_rates()
-        # Converte via USD: base/quote = rates[quote] / rates[base]
-        base_usd  = float(rates.get(base.lower(), 0))
-        quote_usd = float(rates.get(quote.lower(), 0))
+        base_usd  = float(rates.get(base.upper(), 0))
+        quote_usd = float(rates.get(quote.upper(), 0))
         if not base_usd or not quote_usd:
             return None
         bid = round(quote_usd / base_usd, 4)
