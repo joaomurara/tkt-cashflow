@@ -7,8 +7,44 @@ import pandas as pd
 from datetime import date, timedelta
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import requests
 import db
 import auth
+
+
+def _buscar_ptax(moeda: str = "USD", ref_date: date | None = None) -> float | None:
+    """Busca PTAX de venda do BCB. Tenta até 5 dias anteriores."""
+    if ref_date is None:
+        ref_date = date.today()
+    for delta in range(5):
+        d = ref_date - timedelta(days=delta)
+        d_str = d.strftime("%m-%d-%Y")
+        try:
+            if moeda == "USD":
+                url = (
+                    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+                    f"CotacaoDolarDia(dataCotacao=@dataCotacao)?"
+                    f"@dataCotacao='{d_str}'&$top=1&$format=json&$select=cotacaoVenda"
+                )
+            else:
+                url = (
+                    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+                    f"CotacaoMoedaDia(moeda=@moeda,dataCotacao=@dataCotacao)?"
+                    f"@moeda='{moeda}'&@dataCotacao='{d_str}'&$top=1&$format=json&$select=cotacaoVenda"
+                )
+            val = requests.get(url, timeout=5).json().get("value", [])
+            if val:
+                return float(val[0]["cotacaoVenda"])
+        except Exception:
+            continue
+    return None
+
+
+def _ptax_cached(moeda: str) -> float | None:
+    key = f"_ind_ptax_{moeda}"
+    if key not in st.session_state:
+        st.session_state[key] = _buscar_ptax(moeda)
+    return st.session_state[key]
 
 
 def render():
@@ -23,7 +59,23 @@ def render():
     saldos = db.listar_saldos_recentes()
     total_bancos = sum(r["saldo"] or 0 for r in saldos)
 
-    # Métricas resumo
+    # ── Câmbios disponíveis → BRL projetado ───────────────────────────────
+    cambios_disp = db.listar_cambios(status="DISPONIVEL")
+    moedas_unicas = {c["moeda"] for c in cambios_disp}
+    ptax_map = {m: _ptax_cached(m) for m in moedas_unicas}
+
+    total_cambios_brl = 0.0
+    cambios_sem_ptax  = []
+    for c in cambios_disp:
+        taxa = ptax_map.get(c["moeda"])
+        if taxa:
+            total_cambios_brl += (c["valor_me"] or 0) * taxa
+        else:
+            cambios_sem_ptax.append(c["moeda"])
+
+    total_consolidado = total_bancos + total_cambios_brl
+
+    # Métricas resumo — contas bancárias
     if saldos:
         cols_banco = st.columns(min(len(saldos), 4))
         for i, r in enumerate(saldos):
@@ -35,7 +87,31 @@ def render():
     else:
         st.info("Nenhum saldo cadastrado. Adicione uma conta abaixo.")
 
-    st.markdown(f"**Total em caixa:** `R$ {total_bancos:,.2f}`")
+    # ── Linha de totais ───────────────────────────────────────────────────
+    col_t1, col_t2, col_t3 = st.columns(3)
+    col_t1.metric("💰 Caixa BRL", f"R$ {total_bancos:,.2f}")
+
+    if cambios_disp:
+        detalhe_cambio = "  |  ".join(
+            f"{m} {sum(c['valor_me'] or 0 for c in cambios_disp if c['moeda'] == m):,.2f}"
+            for m in sorted(moedas_unicas)
+        )
+        ptax_nota = "PTAX indisponível para: " + ", ".join(set(cambios_sem_ptax)) if cambios_sem_ptax else None
+        col_t2.metric(
+            "💱 Câmbios a receber (BRL proj.)",
+            f"R$ {total_cambios_brl:,.2f}",
+            delta=detalhe_cambio,
+        )
+        if ptax_nota:
+            col_t2.caption(f"⚠️ {ptax_nota}")
+    else:
+        col_t2.metric("💱 Câmbios a receber", "R$ 0,00", delta="nenhuma posição aberta")
+
+    col_t3.metric(
+        "🏦 Posição consolidada",
+        f"R$ {total_consolidado:,.2f}",
+        delta=f"caixa + câmbios projetados",
+    )
 
     if can_edit:
         with st.expander("⚙️ Gerenciar contas", expanded=not saldos):
