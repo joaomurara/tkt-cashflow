@@ -195,6 +195,17 @@ def init_db():
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id         BIGSERIAL PRIMARY KEY,
+                data_ref   TEXT NOT NULL,
+                descricao  TEXT,
+                usuario    TEXT,
+                dados      TEXT,
+                criado_em  TEXT DEFAULT NOW()::TEXT
+            )
+        """)
+
         _migrar_db(cur)
 
 
@@ -746,6 +757,48 @@ def get_posicao_consolidada() -> dict:
     }
     st.session_state[cache_key] = resultado
     return resultado
+
+
+# ─── SNAPSHOTS ───────────────────────────────────────────────────────────────
+
+def salvar_snapshot(data_ref: str, descricao: str, usuario: str, dados: dict) -> int:
+    """Persiste um snapshot de projeção. Retorna o id gerado."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO snapshots (data_ref, descricao, usuario, dados)
+            VALUES (%s, %s, %s, %s) RETURNING id
+        """, (data_ref, descricao, usuario, json.dumps(dados, default=str)))
+        return cur.fetchone()["id"]
+
+
+def listar_snapshots() -> list[dict]:
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, data_ref, descricao, usuario, criado_em
+            FROM snapshots
+            ORDER BY data_ref DESC, criado_em DESC
+        """)
+        return [dict(r) for r in cur.fetchall()]
+
+
+def obter_snapshot(snap_id: int) -> dict | None:
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM snapshots WHERE id = %s", (snap_id,))
+        r = cur.fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        d["dados"] = json.loads(d["dados"] or "{}")
+        return d
+
+
+def excluir_snapshot(snap_id: int):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM snapshots WHERE id = %s", (snap_id,))
 
 
 # ─── FC DIÁRIO (VIEW CONSOLIDADA) ────────────────────────────────────────────

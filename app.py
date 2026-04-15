@@ -100,6 +100,7 @@ PAGINAS = {
     "📉 Gráfico":            "grafico",
     "💱 Câmbios":            "cambios",
     "📡 Terminal Financeiro":"terminal_financeiro",
+    "📸 Snapshots":          "snapshots",
     "📄 Relatório PDF":      "relatorio_pdf",
 }
 
@@ -237,6 +238,9 @@ elif pagina == "cambios":
 elif pagina == "terminal_financeiro":
     from pages import terminal_financeiro
     terminal_financeiro.render()
+elif pagina == "snapshots":
+    from pages import snapshots
+    snapshots.render()
 elif pagina == "relatorio_pdf":
     from pages import relatorio_pdf
     relatorio_pdf.render()
