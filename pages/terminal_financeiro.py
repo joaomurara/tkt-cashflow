@@ -26,43 +26,40 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Câmbio ────────────────────────────────────────────────────────────────────
-try:
-    from pipedrive_core import buscar_cambio as _buscar_cambio
-except ImportError:
-    try:
-        from tkt_app.pipedrive_core import buscar_cambio as _buscar_cambio
-    except ImportError:
-        _buscar_cambio = None
+import time as _time
 
 def _get_er_rates() -> dict:
-    """Retorna dict {MOEDA: taxa_BRL} via pipedrive_core (já funcionando)."""
-    if _buscar_cambio:
-        return _buscar_cambio()
-    return {}
+    """Busca taxas USD-base via open.er-api.com com cache em session_state (1h)."""
+    now = _time.time()
+    cached = st.session_state.get("_tf_er_rates", {})
+    ts     = st.session_state.get("_tf_er_ts", 0.0)
+    if cached and (now - ts) < 3600:
+        return cached
+    try:
+        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=15)
+        r.raise_for_status()
+        rates = r.json().get("rates", {})
+        if rates:
+            st.session_state["_tf_er_rates"] = rates
+            st.session_state["_tf_er_ts"]    = now
+            return rates
+    except Exception:
+        pass
+    return cached  # retorna cache antigo se falhar
 
 def get_pair_rate(base, quote):
-    """Retorna taxa de câmbio entre dois pares de moedas."""
+    """Retorna taxa de câmbio entre dois pares de moedas via open.er-api.com."""
     try:
-        rates = _get_er_rates()   # ex: {"USD": 5.70, "EUR": 6.19, "BRL": 1.0, ...}
+        rates = _get_er_rates()   # {"USD": 1.0, "BRL": 5.70, "EUR": 0.92, ...}
         b = base.upper()
         q = quote.upper()
-
-        # Caso direto: taxa já disponível como X/BRL
-        if q == "BRL" and b in rates:
-            bid = round(float(rates[b]), 4)
-            return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
-
-        # Caso inverso: BRL/X
-        if b == "BRL" and q in rates:
-            bid = round(1.0 / float(rates[q]), 4)
-            return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
-
-        # Cruzado: X/Y via BRL (X_BRL / Y_BRL)
-        if b in rates and q in rates:
-            bid = round(float(rates[b]) / float(rates[q]), 4)
-            return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
-
-        return None
+        b_usd = float(rates.get(b, 0))
+        q_usd = float(rates.get(q, 0))
+        if not b_usd or not q_usd:
+            return None
+        # rates são relativas a USD: bid = quantas unidades de Q por 1 B
+        bid = round(q_usd / b_usd, 4)
+        return {"bid": bid, "ask": bid, "high": bid, "low": bid, "pct": 0.0, "name": f"{b}/{q}"}
     except Exception:
         return None
 
@@ -701,7 +698,9 @@ def render():
         MOEDAS_BRL = ["USD", "EUR", "GBP", "JPY", "ARS", "CAD", "AUD", "CHF"]
 
         if st.button("🔄 Atualizar cotações", key="tf_cambio_btn"):
-            st.cache_data.clear()
+            st.session_state.pop("_tf_er_rates", None)
+            st.session_state.pop("_tf_er_ts", None)
+            st.rerun()
 
         with st.spinner("Buscando cotações..."):
             rows = []
