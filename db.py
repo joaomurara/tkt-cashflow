@@ -194,6 +194,10 @@ def _migrar_db(cur):
     cur.execute(
         "ALTER TABLE fup_vendas ADD COLUMN IF NOT EXISTS deal_id TEXT"
     )
+    # Coluna para marcar lançamentos ERP em atraso real (bypass do corte de data)
+    cur.execute(
+        "ALTER TABLE database_erp ADD COLUMN IF NOT EXISTS incluir_atraso BOOLEAN DEFAULT FALSE"
+    )
 
 
 
@@ -273,6 +277,35 @@ def listar_erp(dt_ini=None, dt_fim=None, operacao=None, razao=None):
         cur = conn.cursor()
         cur.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
+
+
+def listar_erp_pendentes_atraso(dt_corte: str):
+    """Retorna lançamentos ERP com vencimento < dt_corte e status PENDENTE."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM database_erp
+            WHERE vencimento < %s
+              AND status NOT IN ('PAGO', 'RECEBIDO')
+            ORDER BY vencimento
+        """, (str(dt_corte),))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def atualizar_erp_atraso(ids_true: list[int], ids_false: list[int]):
+    """Atualiza a flag incluir_atraso para os ids fornecidos."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        if ids_true:
+            cur.execute(
+                "UPDATE database_erp SET incluir_atraso = TRUE  WHERE id = ANY(%s)",
+                (ids_true,)
+            )
+        if ids_false:
+            cur.execute(
+                "UPDATE database_erp SET incluir_atraso = FALSE WHERE id = ANY(%s)",
+                (ids_false,)
+            )
 
 
 def salvar_mapeamento_csv(nome: str, mapeamento: dict):
@@ -640,7 +673,11 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
             FROM database_erp
             WHERE probabilidade = ANY(%s)
               {cond_dt}
-              AND NOT (vencimento < %s AND status NOT IN ('PAGO','RECEBIDO'))
+              AND NOT (
+                vencimento < %s
+                AND status NOT IN ('PAGO','RECEBIDO')
+                AND NOT COALESCE(incluir_atraso, FALSE)
+              )
         """
         params_erp = [filtros_prob] + params_dt + [str(dt_ini)]
     else:

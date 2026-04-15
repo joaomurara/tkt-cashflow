@@ -33,7 +33,9 @@ def render():
     st.title("📂 DATABASE / ERP")
     st.markdown("Importe os lançamentos do ERP. Contém tanto registros **já realizados** quanto **a realizar** (a pagar e a receber).")
 
-    tab_import, tab_dados, tab_estatisticas = st.tabs(["📥 Importar CSV", "📋 Dados Atuais", "📊 Estatísticas"])
+    tab_import, tab_dados, tab_atraso, tab_estatisticas = st.tabs([
+        "📥 Importar CSV", "📋 Dados Atuais", "🔴 Em Atraso", "📊 Estatísticas"
+    ])
 
     # ─── ABA IMPORTAR ──────────────────────────────────────────────────────
     with tab_import:
@@ -273,6 +275,66 @@ def render():
                 st.rerun()
         else:
             st.info("Nenhum dado importado ainda. Use a aba **Importar CSV** para começar.")
+
+    # ─── ABA EM ATRASO ────────────────────────────────────────────────────
+    with tab_atraso:
+        st.subheader("🔴 Lançamentos em Atraso")
+        st.markdown(
+            "Lançamentos ERP com vencimento **antes do período de análise** e status **PENDENTE**. "
+            "Marque os que são atrasos reais — eles entrarão no fluxo de caixa mesmo com o corte de data ativo."
+        )
+
+        dt_corte = st.session_state.get("cfg_dt_ini") or str(date(date.today().year, 1, 1))
+        st.caption(f"Data de corte atual: **{dt_corte}** (início do período de análise)")
+
+        pendentes = db.listar_erp_pendentes_atraso(dt_corte)
+
+        if not pendentes:
+            st.success("Nenhum lançamento PENDENTE anterior ao período de análise.")
+        else:
+            st.info(f"{len(pendentes)} lançamento(s) encontrado(s). Marque os que são **atrasos reais**.")
+
+            df_at = pd.DataFrame(pendentes)
+            df_at["incluir_atraso"] = df_at["incluir_atraso"].fillna(False).astype(bool)
+
+            df_edit = df_at[[
+                "id", "incluir_atraso", "operacao", "razao_social",
+                "descricao", "vencimento", "valor_final", "status"
+            ]].copy()
+            df_edit = df_edit.rename(columns={
+                "incluir_atraso": "Em Atraso?",
+                "operacao":       "Op.",
+                "razao_social":   "Razão Social",
+                "descricao":      "Descrição",
+                "vencimento":     "Vencimento",
+                "valor_final":    "Valor",
+                "status":         "Status",
+            })
+
+            edited = st.data_editor(
+                df_edit,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["id", "Op.", "Razão Social", "Descrição", "Vencimento", "Valor", "Status"],
+                column_config={
+                    "id":          st.column_config.NumberColumn("ID", width="small"),
+                    "Em Atraso?":  st.column_config.CheckboxColumn("Em Atraso?", width="small",
+                                       help="Marque para incluir no fluxo mesmo sendo anterior ao período"),
+                    "Valor":       st.column_config.NumberColumn("Valor", format="R$ %.2f"),
+                },
+                key="erp_atraso_editor",
+            )
+
+            if st.button("💾 Salvar marcações", type="primary", key="erp_atraso_salvar"):
+                ids_true  = edited.loc[edited["Em Atraso?"] == True,  "id"].tolist()
+                ids_false = edited.loc[edited["Em Atraso?"] == False, "id"].tolist()
+                db.atualizar_erp_atraso(
+                    [int(i) for i in ids_true],
+                    [int(i) for i in ids_false],
+                )
+                marcados = len(ids_true)
+                st.success(f"✅ {marcados} lançamento(s) marcado(s) como Em Atraso.")
+                st.rerun()
 
     # ─── ABA ESTATÍSTICAS ─────────────────────────────────────────────────
     with tab_estatisticas:
