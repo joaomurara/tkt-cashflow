@@ -33,8 +33,10 @@ ETIQUETA_OBRIGATORIA    = "TAG FINANCAS"
 ETIQUETA_OBRIGATORIA_ID = None  # resolvido dinamicamente pelo nome
 
 # ─── CÂMBIO ─────────────────────────────────────────────────────────────────
-CAMBIO_API_URL    = "https://open.er-api.com/v6/latest/USD"   # sem rate limit
-TODAS_MOEDAS      = ["USD", "EUR", "ARS", "COP", "PEN", "CRC", "HNL", "GTQ", "PAB"]
+# CDN Cloudflare — sem rate limit, sem chave, acessível de qualquer servidor
+CAMBIO_API_URL      = "https://latest.currency-api.pages.dev/v1/currencies/usd.json"
+CAMBIO_API_FALLBACK = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json"
+TODAS_MOEDAS        = ["USD", "EUR", "ARS", "COP", "PEN", "CRC", "HNL", "GTQ", "PAB"]
 
 # ─── CUSTOS E IMPOSTOS PADRÃO ────────────────────────────────────────────────
 CUSTOS_PADRAO = [
@@ -75,28 +77,22 @@ def buscar_cambio(log_fn=None):
 
     cambio = {"BRL": 1.0}
 
-    # ── Tenta até 3 vezes com backoff exponencial ─────────────────────────────
-    MAX_TENTATIVAS = 3
-    for tentativa in range(1, MAX_TENTATIVAS + 1):
+    # ── Tenta até 3 vezes com fallback de URL ────────────────────────────────
+    urls = [CAMBIO_API_URL, CAMBIO_API_FALLBACK]
+    for tentativa, url in enumerate(urls, 1):
         try:
-            resp = requests.get(CAMBIO_API_URL, timeout=15)
-            if resp.status_code == 429:
-                espera = 2 ** tentativa
-                _log(f"⚠️ API câmbio: limite (429). Aguardando {espera}s… ({tentativa}/{MAX_TENTATIVAS})")
-                time.sleep(espera)
-                continue
+            resp = requests.get(url, timeout=15)
             resp.raise_for_status()
             data  = resp.json()
-            rates = data.get("rates", {})
+            # Resposta: {"date": "...", "usd": {"brl": 5.7, "eur": 0.92, ...}}
+            rates = data.get("usd", {})  # chaves em minúsculo
 
-            # A API retorna taxas base USD: rates["BRL"] = qtd BRL por 1 USD
-            # Para qualquer moeda X: X/BRL = rates["BRL"] / rates["X"]
-            usd_brl = float(rates.get("BRL", 0))
+            usd_brl = float(rates.get("brl", 0))
             if not usd_brl:
                 raise ValueError("BRL não encontrado na resposta da API")
 
             for moeda in TODAS_MOEDAS:
-                usd_x = float(rates.get(moeda, 0))
+                usd_x = float(rates.get(moeda.lower(), 0))
                 if not usd_x:
                     _log(f"⚠️ Moeda {moeda} não encontrada na API")
                     continue
@@ -107,19 +103,17 @@ def buscar_cambio(log_fn=None):
             # ── Salva no cache ─────────────────────────────────────────────────
             _cambio_cache    = dict(cambio)
             _cambio_cache_ts = time.time()
-            _log("✅ Câmbio atualizado com sucesso (open.er-api.com)")
+            _log("✅ Câmbio atualizado com sucesso")
             break  # sucesso — sai do loop
 
         except Exception as e:
-            if tentativa == MAX_TENTATIVAS:
-                _log(f"⚠️ Não foi possível buscar câmbio após {MAX_TENTATIVAS} tentativas: {e}")
+            if tentativa == len(urls):
+                _log(f"⚠️ Não foi possível buscar câmbio após {len(urls)} tentativas: {e}")
                 if _cambio_cache:
                     _log("💱 Usando último câmbio em cache como fallback")
                     return dict(_cambio_cache)
             else:
-                espera = 2 ** tentativa
-                _log(f"⚠️ Erro ao buscar câmbio: {e}. Aguardando {espera}s…")
-                time.sleep(espera)
+                _log(f"⚠️ Erro na URL principal, tentando fallback… ({e})")
 
     return cambio
 

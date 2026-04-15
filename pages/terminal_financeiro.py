@@ -29,27 +29,35 @@ except ImportError:
 import time as _time
 _er_rates_cache: dict = {}
 _er_rates_ts: float = 0.0
+_ER_URLS = [
+    "https://latest.currency-api.pages.dev/v1/currencies/usd.json",
+    "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
+]
 
 def _get_er_rates() -> dict:
-    """Busca todas as taxas USD-base via open.er-api.com (sem rate limit, cache 1h)."""
+    """Busca taxas USD-base via CDN Cloudflare (sem rate limit, cache 1h)."""
     global _er_rates_cache, _er_rates_ts
     if _er_rates_cache and (_time.time() - _er_rates_ts) < 3600:
         return _er_rates_cache
-    try:
-        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=10)
-        r.raise_for_status()
-        _er_rates_cache = r.json().get("rates", {})
-        _er_rates_ts = _time.time()
-    except Exception:
-        pass
+    for url in _ER_URLS:
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            rates = r.json().get("usd", {})  # chaves em minúsculo
+            if rates:
+                _er_rates_cache = rates
+                _er_rates_ts = _time.time()
+                return _er_rates_cache
+        except Exception:
+            continue
     return _er_rates_cache
 
 def get_pair_rate(base, quote):
     try:
         rates = _get_er_rates()
         # Converte via USD: base/quote = rates[quote] / rates[base]
-        base_usd  = float(rates.get(base, 0))
-        quote_usd = float(rates.get(quote, 0))
+        base_usd  = float(rates.get(base.lower(), 0))
+        quote_usd = float(rates.get(quote.lower(), 0))
         if not base_usd or not quote_usd:
             return None
         bid = round(quote_usd / base_usd, 4)
