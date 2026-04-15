@@ -292,9 +292,18 @@ def render():
         if not pendentes:
             st.success("Nenhum lançamento PENDENTE anterior ao período de análise.")
         else:
-            st.info(f"{len(pendentes)} lançamento(s) encontrado(s). Marque os que são **atrasos reais**.")
+            busca = st.text_input("🔍 Buscar", placeholder="Razão social, descrição, código...", key="erp_atraso_busca")
 
             df_at = pd.DataFrame(pendentes)
+            if busca:
+                mask = (
+                    df_at["razao_social"].str.contains(busca, case=False, na=False) |
+                    df_at["descricao"].str.contains(busca, case=False, na=False) |
+                    df_at["codigo"].str.contains(busca, case=False, na=False)
+                )
+                df_at = df_at[mask]
+
+            st.info(f"{len(df_at)} lançamento(s) exibido(s). Marque os que são **atrasos reais**.")
             df_at["incluir_atraso"] = df_at["incluir_atraso"].fillna(False).astype(bool)
 
             df_edit = df_at[[
