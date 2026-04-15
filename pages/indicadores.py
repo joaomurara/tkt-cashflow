@@ -262,25 +262,54 @@ def render():
     inc_fci_2s   = st.checkbox("Incluir FCI",   value=True, key="proj2s_fci")
     inc_fcf_2s   = st.checkbox("Incluir FCF",   value=True, key="proj2s_fcf")
 
-    dias_uteis  = _proximos_uteis(base_date, 10, fer_set)
+    todas_linhas = []  # inicializa; será preenchido após definir janela
+
+    # Data máxima da projeção dos 10 dias úteis
+    col_dt_max1, col_dt_max2 = st.columns([2, 3])
+    with col_dt_max1:
+        n_dias_uteis = st.number_input(
+            "Quantidade de dias úteis",
+            min_value=1, max_value=60, value=10, step=1,
+            key="proj2s_n_dias",
+            help="Número de dias úteis a projetar a partir da data base."
+        )
+    with col_dt_max2:
+        dt_max_manual = st.date_input(
+            "Ou defina a data máxima diretamente",
+            value=None,
+            key="proj2s_dt_max",
+            help="Se preenchida, sobrepõe a quantidade de dias úteis acima."
+        )
+
+    # Recalcula dias úteis considerando data máxima ou quantidade
+    if dt_max_manual and dt_max_manual > base_date:
+        # Enumera todos os úteis entre base_date+1 e dt_max_manual
+        dias_uteis = []
+        _d = base_date
+        while True:
+            _d += timedelta(days=1)
+            if _d > dt_max_manual:
+                break
+            if _d.weekday() < 5 and _d not in fer_set:
+                dias_uteis.append(_d)
+    else:
+        dias_uteis = _proximos_uteis(base_date, int(n_dias_uteis), fer_set)
+
     dias_uteis_set = set(dias_uteis)
 
-    # ── Busca range amplo e agrupa por data útil efetiva ─────────────────
-    # +7 dias de margem para impostos em feriados/fim de semana após o último dia
-    dt_busca_ini = base_date + timedelta(days=1)
-    dt_busca_fim = dias_uteis[-1] + timedelta(days=7)
+    # ── (Re)busca range amplo com a nova janela ───────────────────────────
+    if dias_uteis:
+        dt_busca_ini = base_date + timedelta(days=1)
+        dt_busca_fim = dias_uteis[-1] + timedelta(days=7)
+        todas_linhas = db.fc_diario(
+            str(dt_busca_ini), str(dt_busca_fim),
+            inc_alta_2s, inc_media_2s,
+            erp_corte_status=cfg_corte,
+            inc_fci=inc_fci_2s,
+            inc_fcf=inc_fcf_2s,
+        )
 
-    todas_linhas = db.fc_diario(
-        str(dt_busca_ini), str(dt_busca_fim),
-        inc_alta_2s, inc_media_2s,
-        erp_corte_status=cfg_corte,
-        inc_fci=inc_fci_2s,
-        inc_fcf=inc_fcf_2s,
-    )
-
-    from collections import defaultdict
     dia_map = defaultdict(lambda: {"entradas": 0.0, "saidas": 0.0})
-
     for linha in todas_linhas:
         try:
             dt_orig = date.fromisoformat(str(linha["vencimento"])[:10])
@@ -297,7 +326,7 @@ def render():
             dia_map[dt_ef]["saidas"]   += vf
 
     rows_proj = []
-    saldo_acc = total_bancos
+    saldo_acc = total_consolidado  # 1. Parte da posição consolidada (caixa + câmbios)
     for d in dias_uteis:
         info      = dia_map[d]
         entradas  = info["entradas"]
@@ -329,26 +358,32 @@ def render():
     df_show_proj["Saldo do Dia"]    = df_show_proj["Saldo do Dia"].apply(_fmt)
     df_show_proj["Saldo Acumulado"] = df_show_proj["Saldo Acumulado"].apply(lambda x: _fmt(x, color=True))
 
-    st.caption(f"Base: {base_date.strftime('%d/%m/%Y')} — saldo bancário R$ {total_bancos:,.2f}")
+    st.caption(
+        f"Base: {base_date.strftime('%d/%m/%Y')} — "
+        f"posição consolidada R$ {total_consolidado:,.2f} "
+        f"(caixa R$ {total_bancos:,.2f} + câmbios R$ {total_cambios_brl:,.2f})"
+    )
     st.dataframe(df_show_proj, use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
     # ─── POSIÇÃO PROJETADA ─────────────────────────────────────────────────
     st.subheader("📅 Posição de Caixa Projetada")
+    st.caption("Parte da posição consolidada (caixa + câmbios a receber).")
+
+    col_pp1, col_pp2, col_pp3, col_pp4 = st.columns(4)
+    inc_alta  = col_pp1.checkbox("Incluir ALTA",  value=st.session_state.get("cfg_inc_alta",  True), key="ind_pp_alta")
+    inc_media = col_pp2.checkbox("Incluir MEDIA", value=st.session_state.get("cfg_inc_media", False), key="ind_pp_media")
+    inc_fci   = col_pp3.checkbox("Incluir FCI",   value=True, key="ind_fci")
+    inc_fcf   = col_pp4.checkbox("Incluir FCF",   value=True, key="ind_fcf")
 
     col_p1, col_p2, col_p3 = st.columns(3)
-    inc_alta  = st.checkbox("Incluir ALTA no cálculo",  value=st.session_state.get("cfg_inc_alta",  True))
-    inc_media = st.checkbox("Incluir MEDIA no cálculo", value=st.session_state.get("cfg_inc_media", False))
-    inc_fci   = st.checkbox("Incluir FCI nas Provisões", value=True, key="ind_fci")
-    inc_fcf   = st.checkbox("Incluir FCF nas Provisões", value=True, key="ind_fcf")
-
     for label, dias in [("30 dias", 30), ("60 dias", 60), ("90 dias", 90)]:
         dt_fim = str(hoje + timedelta(days=dias))
         dados = db.fc_diario(str(hoje), dt_fim, inc_alta, inc_media, erp_corte_status=cfg_corte,
                              inc_fci=inc_fci, inc_fcf=inc_fcf)
         fluxo = sum(r["valor_final"] or 0 for r in dados)
-        posicao = total_bancos + fluxo
+        posicao = total_consolidado + fluxo  # 1. Parte da posição consolidada
 
         col = [col_p1, col_p2, col_p3][["30 dias","60 dias","90 dias"].index(label)]
         col.metric(
@@ -362,21 +397,29 @@ def render():
 
     # ─── RECEBÍVEIS E OBRIGAÇÕES ─────────────────────────────────────────
     st.subheader("📋 Recebíveis e Obrigações")
+
+    col_ro1, col_ro2, col_ro3, col_ro4 = st.columns(4)
+    ro_alta  = col_ro1.checkbox("Incluir ALTA",  value=st.session_state.get("cfg_inc_alta",  True), key="ro_alta")
+    ro_media = col_ro2.checkbox("Incluir MEDIA", value=st.session_state.get("cfg_inc_media", False), key="ro_media")
+    ro_fci   = col_ro3.checkbox("Incluir FCI",   value=True, key="ro_fci")
+    ro_fcf   = col_ro4.checkbox("Incluir FCF",   value=True, key="ro_fcf")
+
     dt_fim_ano = str(date(hoje.year, 12, 31))
-    dados_all = db.fc_diario(str(hoje), dt_fim_ano, True, False, erp_corte_status=cfg_corte,
-                             inc_fci=inc_fci, inc_fcf=inc_fcf)
+    dados_all = db.fc_diario(str(hoje), dt_fim_ano, ro_alta, ro_media, erp_corte_status=cfg_corte,
+                             inc_fci=ro_fci, inc_fcf=ro_fcf)
 
     if dados_all:
         total_recebiveis  = sum(r["valor_final"] for r in dados_all if (r["valor_final"] or 0) > 0)
         total_obrigacoes  = sum(r["valor_final"] for r in dados_all if (r["valor_final"] or 0) < 0)
         total_impostos    = sum(r["valor_final"] for r in dados_all
                                 if r.get("imposto") == "SIM" and (r["valor_final"] or 0) < 0)
+        saldo_projetado   = total_consolidado + total_recebiveis + total_obrigacoes  # 1. Posição consolidada
 
         col_k1, col_k2, col_k3, col_k4 = st.columns(4)
         col_k1.metric("Recebíveis Totais",  f"R$ {total_recebiveis:,.2f}")
         col_k2.metric("Obrigações Totais",  f"R$ {abs(total_obrigacoes):,.2f}")
-        col_k3.metric("Saldo Projetado",
-                       f"R$ {total_recebiveis + total_obrigacoes:,.2f}")
+        col_k3.metric("Saldo Projetado",    f"R$ {saldo_projetado:,.2f}",
+                       delta="consolidado + fluxo do período")
         col_k4.metric("Impostos a pagar",   f"R$ {abs(total_impostos):,.2f}")
     else:
         st.info("Sem dados de fluxo para o período.")
@@ -397,8 +440,8 @@ def render():
     # ─── PRÓXIMOS VENCIMENTOS ─────────────────────────────────────────────
     st.subheader("🔔 Próximos vencimentos (15 dias)")
     dt_15 = str(hoje + timedelta(days=15))
-    proximos = db.fc_diario(str(hoje), dt_15, True, False, erp_corte_status=cfg_corte,
-                            inc_fci=inc_fci, inc_fcf=inc_fcf)
+    proximos = db.fc_diario(str(hoje), dt_15, ro_alta, ro_media, erp_corte_status=cfg_corte,
+                            inc_fci=ro_fci, inc_fcf=ro_fcf)
     if proximos:
         df_prox = pd.DataFrame(proximos)
         df_prox["vencimento"] = pd.to_datetime(df_prox["vencimento"]).dt.strftime("%d/%m/%Y")
