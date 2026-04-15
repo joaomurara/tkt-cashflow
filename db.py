@@ -309,6 +309,8 @@ def inserir_provisao(dados: dict) -> int:
     )
     with get_conn() as conn:
         cur = conn.cursor()
+        # Sincroniza sequence antes de inserir (evita conflito de PK pós-migração)
+        cur.execute("SELECT setval('provisoes_id_seq', (SELECT COALESCE(MAX(id), 0) FROM provisoes))")
         cur.execute("""
             INSERT INTO provisoes
               (operacao, codigo, tipo, lote, razao_social, descricao,
@@ -453,14 +455,20 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True):
         conn.autocommit = False
         cur = conn.cursor()
 
-        # 1. Remove entradas anteriores deste deal em Provisões (evita UniqueViolation)
-        #    Identifica pelo código + razao_social (mesmo critério do "Excluir por Origem")
+        # 1. Sincroniza a sequence com o max(id) atual (evita conflito de PK
+        #    causado por migração com ids explícitos que não atualizaram a sequence)
+        cur.execute("""
+            SELECT setval('provisoes_id_seq',
+                          (SELECT COALESCE(MAX(id), 0) FROM provisoes))
+        """)
+
+        # 2. Remove entradas anteriores deste deal em Provisões
         cur.execute("""
             DELETE FROM provisoes
             WHERE codigo = %s AND razao_social = %s
         """, (codigo_deal, razao_deal))
 
-        # 2. Insere todas as linhas frescas
+        # 3. Insere todas as linhas frescas
         for l in linhas:
             prov = {
                 "operacao":      l.get("operacao", ""),
