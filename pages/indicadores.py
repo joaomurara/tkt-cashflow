@@ -53,7 +53,52 @@ def render():
     # ─── PROJEÇÃO 2 SEMANAS (10 DIAS ÚTEIS) ──────────────────────────────
     st.subheader("📆 Projeção — Próximos 10 Dias Úteis")
 
-    # Base date: data do saldo mais recente (ou hoje) como padrão
+    # ── Feriados nacionais brasileiros ────────────────────────────────────
+    def _easter(year: int) -> date:
+        a = year % 19; b = year // 100; c = year % 100
+        d = b // 4;    e = b % 4;       f = (b + 8) // 25
+        g = (b - f + 1) // 3
+        h = (19 * a + b - d - g + 15) % 30
+        i = c // 4;    k = c % 4
+        l = (32 + 2 * e + 2 * i - h - k) % 7
+        m = (a + 11 * h + 22 * l) // 451
+        month = (h + l - 7 * m + 114) // 31
+        day   = ((h + l - 7 * m + 114) % 31) + 1
+        return date(year, month, day)
+
+    def _feriados(anos):
+        f = set()
+        for ano in anos:
+            f.update([
+                date(ano, 1,  1),  date(ano, 4,  21), date(ano, 5,  1),
+                date(ano, 9,  7),  date(ano, 10, 12), date(ano, 11, 2),
+                date(ano, 11, 15), date(ano, 11, 20), date(ano, 12, 25),
+            ])
+            p = _easter(ano)
+            f.update([
+                p - timedelta(days=48),  # Carnaval 2a
+                p - timedelta(days=47),  # Carnaval 3a
+                p - timedelta(days=2),   # Sexta-feira Santa
+                p + timedelta(days=60),  # Corpus Christi
+            ])
+        return f
+
+    def _prox_util(d: date, fer: set) -> date:
+        while d.weekday() >= 5 or d in fer:
+            d += timedelta(days=1)
+        return d
+
+    def _ult_util_antes(d: date, fer: set) -> date:
+        while d.weekday() >= 5 or d in fer:
+            d -= timedelta(days=1)
+        return d
+
+    def _dt_efetiva(d: date, is_imposto: bool, fer: set) -> date:
+        if d.weekday() < 5 and d not in fer:
+            return d
+        return _ult_util_antes(d, fer) if is_imposto else _prox_util(d, fer)
+
+    # ── Base date e geração dos 10 dias úteis (sem feriados) ─────────────
     if saldos:
         try:
             default_base = date.fromisoformat(saldos[0]["data"])
@@ -69,13 +114,15 @@ def render():
         help="Os 10 dias úteis serão contados a partir desta data.",
     )
 
-    # Gera os 10 próximos dias úteis a partir de base_date
-    def _proximos_uteis(start: date, n: int):
-        dias = []
-        d = start
+    # Calcula feriados para os anos necessários
+    _anos_ref = {base_date.year, base_date.year + 1}
+    fer_set = _feriados(_anos_ref)
+
+    def _proximos_uteis(start: date, n: int, fer: set):
+        dias, d = [], start
         while len(dias) < n:
             d += timedelta(days=1)
-            if d.weekday() < 5:  # 0=seg … 4=sex
+            if d.weekday() < 5 and d not in fer:
                 dias.append(d)
         return dias
 
@@ -86,24 +133,51 @@ def render():
     inc_fci_2s   = st.checkbox("Incluir FCI",   value=True, key="proj2s_fci")
     inc_fcf_2s   = st.checkbox("Incluir FCF",   value=True, key="proj2s_fcf")
 
-    dias_uteis = _proximos_uteis(base_date, 10)
+    dias_uteis  = _proximos_uteis(base_date, 10, fer_set)
+    dias_uteis_set = set(dias_uteis)
+
+    # ── Busca range amplo e agrupa por data útil efetiva ─────────────────
+    # +7 dias de margem para impostos em feriados/fim de semana após o último dia
+    dt_busca_ini = base_date + timedelta(days=1)
+    dt_busca_fim = dias_uteis[-1] + timedelta(days=7)
+
+    todas_linhas = db.fc_diario(
+        str(dt_busca_ini), str(dt_busca_fim),
+        inc_alta_2s, inc_media_2s,
+        erp_corte_status=cfg_corte,
+        inc_fci=inc_fci_2s,
+        inc_fcf=inc_fcf_2s,
+    )
+
+    from collections import defaultdict
+    dia_map = defaultdict(lambda: {"entradas": 0.0, "saidas": 0.0})
+
+    for linha in todas_linhas:
+        try:
+            dt_orig = date.fromisoformat(str(linha["vencimento"])[:10])
+        except Exception:
+            continue
+        is_imp = (linha.get("imposto") or "").upper() == "SIM"
+        dt_ef  = _dt_efetiva(dt_orig, is_imp, fer_set)
+        if dt_ef not in dias_uteis_set:
+            continue
+        vf = linha.get("valor_final") or 0
+        if vf > 0:
+            dia_map[dt_ef]["entradas"] += vf
+        else:
+            dia_map[dt_ef]["saidas"]   += vf
 
     rows_proj = []
     saldo_acc = total_bancos
     for d in dias_uteis:
-        linhas_dia = db.fc_diario(
-            str(d), str(d),
-            inc_alta_2s, inc_media_2s,
-            erp_corte_status=cfg_corte,
-            inc_fci=inc_fci_2s,
-            inc_fcf=inc_fcf_2s,
-        )
-        entradas = sum(r["valor_final"] for r in linhas_dia if (r["valor_final"] or 0) > 0)
-        saidas   = sum(r["valor_final"] for r in linhas_dia if (r["valor_final"] or 0) < 0)
+        info      = dia_map[d]
+        entradas  = info["entradas"]
+        saidas    = info["saidas"]
         saldo_dia = entradas + saidas
         saldo_acc += saldo_dia
+        feriado_note = " 🎉" if d in fer_set else ""
         rows_proj.append({
-            "Data":            d.strftime("%d/%m/%Y"),
+            "Data":            d.strftime("%d/%m/%Y") + feriado_note,
             "Dia":             DIAS_PT[d.weekday()],
             "Entradas":        entradas,
             "Saídas":          abs(saidas),
@@ -115,12 +189,9 @@ def render():
 
     def _fmt(v, color=True):
         if color:
-            if v > 0:
-                return f"🟢 R$ {v:,.2f}"
-            elif v < 0:
-                return f"🔴 R$ {abs(v):,.2f}"
-            else:
-                return f"R$ 0,00"
+            if v > 0:   return f"🟢 R$ {v:,.2f}"
+            elif v < 0: return f"🔴 R$ {abs(v):,.2f}"
+            else:       return "R$ 0,00"
         return f"R$ {v:,.2f}"
 
     df_show_proj = df_proj.copy()
@@ -130,7 +201,6 @@ def render():
     df_show_proj["Saldo Acumulado"] = df_show_proj["Saldo Acumulado"].apply(lambda x: _fmt(x, color=True))
 
     st.caption(f"Base: {base_date.strftime('%d/%m/%Y')} — saldo bancário R$ {total_bancos:,.2f}")
-
     st.dataframe(df_show_proj, use_container_width=True, hide_index=True)
 
     st.markdown("---")
