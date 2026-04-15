@@ -378,6 +378,15 @@ def render():
     inc_fci   = col_pp3.checkbox("Incluir FCI",   value=True, key="ind_fci")
     inc_fcf   = col_pp4.checkbox("Incluir FCF",   value=True, key="ind_fcf")
 
+    def _brl_k(v: float) -> str:
+        """Formato compacto: 2.38M, 899.3K ou valor inteiro."""
+        av = abs(v)
+        if av >= 1_000_000:
+            return f"R$ {v/1_000_000:.2f}M"
+        if av >= 1_000:
+            return f"R$ {v/1_000:.1f}K"
+        return f"R$ {v:,.0f}"
+
     col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
     _pp_cols = [col_p1, col_p2, col_p3, col_p4, col_p5]
     for idx, (label, dias) in enumerate([("7 dias", 7), ("15 dias", 15), ("30 dias", 30), ("60 dias", 60), ("90 dias", 90)]):
@@ -389,8 +398,8 @@ def render():
 
         _pp_cols[idx].metric(
             f"Posição em {label}",
-            f"R$ {posicao:,.2f}",
-            delta=f"R$ {fluxo:,.2f} de fluxo",
+            _brl_k(posicao),
+            delta=f"{_brl_k(fluxo)} de fluxo",
             delta_color="normal"
         )
 
