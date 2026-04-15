@@ -27,9 +27,17 @@ def _img_to_b64(path: str) -> str:
 _icon_path = os.path.join(os.path.dirname(__file__), "logo_tecnontok_basico.png")
 try:
     from PIL import Image as _PIL
-    _page_icon = _PIL.open(_icon_path)
+    _img = _PIL.open(_icon_path)
+    _img.load()          # força leitura completa em memória
+    _page_icon = _img
 except Exception:
-    _page_icon = "💰"
+    try:
+        # fallback: lê bytes e converte
+        import io
+        with open(_icon_path, "rb") as _f:
+            _page_icon = _PIL.open(io.BytesIO(_f.read()))
+    except Exception:
+        _page_icon = "💰"
 
 st.set_page_config(
     page_title="TKT Cash Flow",
