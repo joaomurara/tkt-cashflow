@@ -182,12 +182,12 @@ with st.sidebar:
             st.rerun()
 
         # Expõe para uso nas páginas via session_state
-        st.session_state["cfg_dt_ini"]          = str(dt_ini_cfg)
-        st.session_state["cfg_dt_fim"]          = str(dt_fim_cfg)
-        st.session_state["cfg_inc_alta"]        = inc_alta_cfg
-        st.session_state["cfg_inc_media"]       = inc_media_cfg
-        st.session_state["cfg_corte_status"]    = corte_status
-        st.session_state["cfg_atraso_dt_ini"]   = atraso_dt_ini
+        st.session_state["cfg_dt_ini"]        = str(dt_ini_cfg)
+        st.session_state["cfg_dt_fim"]        = str(dt_fim_cfg)
+        st.session_state["cfg_inc_alta"]      = inc_alta_cfg
+        st.session_state["cfg_inc_media"]     = inc_media_cfg
+        st.session_state["cfg_corte_status"]  = corte_status
+        # cfg_atraso_dt_ini é gerenciado automaticamente pelo checkbox (key="cfg_atraso_dt_ini")
 
     st.markdown("---")
     st.caption("Tecnotok © 2026")
