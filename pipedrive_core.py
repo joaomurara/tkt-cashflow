@@ -3,6 +3,7 @@ pipedrive_core.py — Lógica Pipedrive e geração de fluxo de caixa
 Extraído de exportar_pipedrive.py e adaptado para usar db.py (SQLite)
 """
 
+import os
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
@@ -12,7 +13,14 @@ from db import (
 )
 
 # ─── CONFIGURAÇÃO PIPEDRIVE ──────────────────────────────────────────────────
-API_TOKEN = "cfea080ebd2ed2ba33f2c0e809df9920ebd5af73"
+def _get_api_token() -> str:
+    try:
+        import streamlit as st
+        return st.secrets["pipedrive"]["api_key"]
+    except Exception:
+        return os.environ.get("PIPEDRIVE_API_KEY", "")
+
+API_TOKEN = _get_api_token()
 BASE_URL  = "https://api.pipedrive.com/v1"
 
 FILTROS = {
