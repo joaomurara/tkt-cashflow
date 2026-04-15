@@ -441,6 +441,10 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True):
     if not linhas:
         return (0, None)
 
+    # Identifica o deal pelo código e razao_social da primeira linha
+    codigo_deal     = str(linhas[0].get("codigo", "") or "")
+    razao_deal      = str(linhas[0].get("razao_social", "") or "")
+
     conn = None
     try:
         import psycopg2
@@ -449,6 +453,14 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True):
         conn.autocommit = False
         cur = conn.cursor()
 
+        # 1. Remove entradas anteriores deste deal em Provisões (evita UniqueViolation)
+        #    Identifica pelo código + razao_social (mesmo critério do "Excluir por Origem")
+        cur.execute("""
+            DELETE FROM provisoes
+            WHERE codigo = %s AND razao_social = %s
+        """, (codigo_deal, razao_deal))
+
+        # 2. Insere todas as linhas frescas
         for l in linhas:
             prov = {
                 "operacao":      l.get("operacao", ""),
@@ -464,45 +476,17 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True):
                 "probabilidade": l.get("probabilidade", "CONFIRMADO"),
                 "imposto":       l.get("imposto", "NAO"),
             }
-            cur.execute("SAVEPOINT sp_fup")
-            try:
-                cur.execute("""
-                    INSERT INTO provisoes
-                      (operacao, codigo, tipo, lote, razao_social, descricao,
-                       vencimento, valor, valor_final, semana, probabilidade, imposto)
-                    VALUES
-                      (%(operacao)s, %(codigo)s, %(tipo)s, %(lote)s, %(razao_social)s,
-                       %(descricao)s, %(vencimento)s, %(valor)s, %(valor_final)s,
-                       %(semana)s, %(probabilidade)s, %(imposto)s)
-                """, prov)
-                cur.execute("RELEASE SAVEPOINT sp_fup")
-            except Exception as _ie:
-                cur.execute("ROLLBACK TO SAVEPOINT sp_fup")
-                cur.execute("RELEASE SAVEPOINT sp_fup")
-                pgcode = getattr(_ie, "pgcode", None) or ""
-                if pgcode == "23505":
-                    # UniqueViolation: atualiza o registro conflitante
-                    cur.execute("""
-                        UPDATE provisoes SET
-                          operacao    = %(operacao)s,
-                          tipo        = %(tipo)s,
-                          lote        = %(lote)s,
-                          razao_social= %(razao_social)s,
-                          valor       = %(valor)s,
-                          valor_final = %(valor_final)s,
-                          semana      = %(semana)s,
-                          probabilidade = %(probabilidade)s,
-                          imposto     = %(imposto)s,
-                          atualizado_em = NOW()::TEXT
-                        WHERE codigo    = %(codigo)s
-                          AND vencimento = %(vencimento)s
-                          AND descricao  = %(descricao)s
-                    """, prov)
-                else:
-                    conn.rollback()
-                    conn.close()
-                    return (0, f"[{pgcode}] {_ie}")
+            cur.execute("""
+                INSERT INTO provisoes
+                  (operacao, codigo, tipo, lote, razao_social, descricao,
+                   vencimento, valor, valor_final, semana, probabilidade, imposto)
+                VALUES
+                  (%(operacao)s, %(codigo)s, %(tipo)s, %(lote)s, %(razao_social)s,
+                   %(descricao)s, %(vencimento)s, %(valor)s, %(valor_final)s,
+                   %(semana)s, %(probabilidade)s, %(imposto)s)
+            """, prov)
 
+        # 3. Remove do FUP se solicitado
         if remover_do_fup:
             cur.execute("DELETE FROM fup_vendas WHERE deal_id = %s", (str(deal_id),))
 
