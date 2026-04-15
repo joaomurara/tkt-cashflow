@@ -160,22 +160,34 @@ with st.sidebar:
                 "não baixados no ERP apareçam em duplicidade com o saldo inicial."
             )
         )
+        atraso_dt_ini = st.checkbox(
+            "Atrasos: projetar na data de início do período",
+            value=db.get_cfg("atraso_usar_dt_ini") == "1",
+            key="cfg_atraso_dt_ini",
+            help=(
+                "Itens marcados como Em Atraso aparecem no fluxo:\n"
+                "✅ Marcado → na data de início do período (dt_ini)\n"
+                "⬜ Desmarcado → na data original de vencimento"
+            )
+        )
 
         if st.button("💾 Salvar configurações", key="btn_salvar_cfg"):
-            db.set_cfg("dt_ini",           str(dt_ini_cfg))
-            db.set_cfg("dt_fim",           str(dt_fim_cfg))
-            db.set_cfg("incluir_alta",     "1" if inc_alta_cfg  else "0")
-            db.set_cfg("incluir_media",    "1" if inc_media_cfg else "0")
-            db.set_cfg("erp_corte_status", "1" if corte_status  else "0")
+            db.set_cfg("dt_ini",              str(dt_ini_cfg))
+            db.set_cfg("dt_fim",              str(dt_fim_cfg))
+            db.set_cfg("incluir_alta",        "1" if inc_alta_cfg  else "0")
+            db.set_cfg("incluir_media",       "1" if inc_media_cfg else "0")
+            db.set_cfg("erp_corte_status",    "1" if corte_status  else "0")
+            db.set_cfg("atraso_usar_dt_ini",  "1" if atraso_dt_ini else "0")
             st.success("Salvo!")
             st.rerun()
 
         # Expõe para uso nas páginas via session_state
-        st.session_state["cfg_dt_ini"]        = str(dt_ini_cfg)
-        st.session_state["cfg_dt_fim"]        = str(dt_fim_cfg)
-        st.session_state["cfg_inc_alta"]      = inc_alta_cfg
-        st.session_state["cfg_inc_media"]     = inc_media_cfg
-        st.session_state["cfg_corte_status"]  = corte_status
+        st.session_state["cfg_dt_ini"]          = str(dt_ini_cfg)
+        st.session_state["cfg_dt_fim"]          = str(dt_fim_cfg)
+        st.session_state["cfg_inc_alta"]        = inc_alta_cfg
+        st.session_state["cfg_inc_media"]       = inc_media_cfg
+        st.session_state["cfg_corte_status"]    = corte_status
+        st.session_state["cfg_atraso_dt_ini"]   = atraso_dt_ini
 
     st.markdown("---")
     st.caption("Tecnotok © 2026")

@@ -624,21 +624,32 @@ def get_saldo_total() -> float:
 
 def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
               erp_corte_status=True, saldo_inicial: float = None,
-              inc_fci=True, inc_fcf=True):
+              inc_fci=True, inc_fcf=True, atraso_usar_dt_ini=None):
     """
     Consolida DATABASE + Provisões + FUP Vendas em um único fluxo diário.
 
     erp_corte_status (bool):
         Quando True, lançamentos ERP com vencimento ANTES de dt_ini só entram
-        no fluxo se o status for PAGO ou RECEBIDO — evita duplicidade com saldo inicial.
+        no fluxo se o status for PAGO/RECEBIDO OU se tiverem incluir_atraso=TRUE.
 
     saldo_inicial (float | None):
         Valor de partida para o saldo acumulado. Se None, usa get_saldo_total().
 
     inc_fci / inc_fcf (bool):
         Controla se provisões do tipo FCI / FCF entram no cálculo.
-        Quando False, exclui as provisões daquele tipo.
+
+    atraso_usar_dt_ini (bool | None):
+        True  → itens em atraso aparecem na data de início do período (dt_ini).
+        False → itens em atraso aparecem na data original de vencimento.
+        None  → lê de st.session_state["cfg_atraso_dt_ini"] (default False).
     """
+    # Resolve configuração de data dos atrasos
+    if atraso_usar_dt_ini is None:
+        try:
+            atraso_usar_dt_ini = bool(st.session_state.get("cfg_atraso_dt_ini", False))
+        except Exception:
+            atraso_usar_dt_ini = False
+
     filtros_prob = ["CONFIRMADO"]
     if incluir_alta:
         filtros_prob.append("ALTA")
@@ -666,20 +677,33 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
         params_tipo_prov = []
 
     if erp_corte_status and dt_ini:
+        # Itens dentro do range OU itens marcados como atraso real (bypass do lower bound)
+        if atraso_usar_dt_ini:
+            # Atrasos aparecem na data de início do período
+            ven_col = ("CASE WHEN COALESCE(incluir_atraso, FALSE) AND vencimento < %s "
+                       "THEN %s ELSE vencimento END")
+            p_ven = [str(dt_ini), str(dt_ini)]
+        else:
+            # Atrasos aparecem na data original de vencimento
+            ven_col = "vencimento"
+            p_ven = []
+
+        cond_fim_erp = f"AND vencimento <= %s" if dt_fim else ""
+        p_fim_erp    = [str(dt_fim)] if dt_fim else []
+
         sql_erp = f"""
             SELECT 'ERP' AS origem, operacao, codigo, tipo, lote,
-                   razao_social, descricao, vencimento, valor, valor_final,
+                   razao_social, descricao, {ven_col} AS vencimento, valor, valor_final,
                    semana, probabilidade, imposto, status
             FROM database_erp
             WHERE probabilidade = ANY(%s)
-              {cond_dt}
-              AND NOT (
-                vencimento < %s
-                AND status NOT IN ('PAGO','RECEBIDO')
-                AND NOT COALESCE(incluir_atraso, FALSE)
+              {cond_fim_erp}
+              AND (
+                vencimento >= %s
+                OR (COALESCE(incluir_atraso, FALSE) AND status NOT IN ('PAGO','RECEBIDO'))
               )
         """
-        params_erp = [filtros_prob] + params_dt + [str(dt_ini)]
+        params_erp = p_ven + [filtros_prob] + p_fim_erp + [str(dt_ini)]
     else:
         sql_erp = f"""
             SELECT 'ERP' AS origem, operacao, codigo, tipo, lote,

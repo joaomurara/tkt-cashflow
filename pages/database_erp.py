@@ -240,8 +240,13 @@ def render():
             df["valor"]       = df["valor"].apply(lambda x: f"R$ {x:,.2f}" if x else "")
             df["valor_final"] = df["valor_final"].apply(lambda x: f"R$ {x:,.2f}" if x else "")
 
+            if "incluir_atraso" in df.columns:
+                df["incluir_atraso"] = df["incluir_atraso"].apply(
+                    lambda x: "🔴 Atraso" if x else ""
+                )
             cols_show = ["operacao", "razao_social", "descricao", "vencimento",
-                         "valor", "valor_final", "status", "probabilidade", "origem"]
+                         "valor", "valor_final", "status", "probabilidade",
+                         "incluir_atraso", "origem"]
             cols_show = [c for c in cols_show if c in df.columns]
             st.caption(f"Exibindo {len(dados)} de {len(total_banco)} registros no banco · período: {dt_ini} → {dt_fim}")
             st.dataframe(df[cols_show], use_container_width=True, height=500)
