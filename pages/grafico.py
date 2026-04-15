@@ -36,7 +36,8 @@ def render():
     with col_f7:
         inc_fcf = st.toggle("FCF", value=True, key="g_fcf")
 
-    saldo_inicial = db.get_saldo_total()
+    posicao = db.get_posicao_consolidada()
+    saldo_inicial = posicao["total"]
 
     dados = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta, inc_media,
                          erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial,
@@ -77,7 +78,10 @@ def render():
     st.bar_chart(chart_data, height=350, use_container_width=True)
 
     # ─── GRÁFICO SALDO ACUMULADO ─────────────────────────────────────────
-    st.subheader(f"Saldo Acumulado *(início: R$ {saldo_inicial:,.2f})*")
+    st.subheader(
+        f"Saldo Acumulado *(posição consolidada: R$ {saldo_inicial:,.2f} — "
+        f"bancos R$ {posicao['total_bancos']:,.2f} + câmbios R$ {posicao['total_cambios_brl']:,.2f})*"
+    )
     saldo_chart = pivot.set_index("periodo")[["saldo_acum"]].rename(
         columns={"saldo_acum": "Saldo Acumulado"}
     )

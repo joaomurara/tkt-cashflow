@@ -38,7 +38,8 @@ def render():
         inc_fci_c2   = st.checkbox("Incluir FCI",   value=True,  key="c2_fci")
         inc_fcf_c2   = st.checkbox("Incluir FCF",   value=True,  key="c2_fcf")
 
-    saldo_inicial = db.get_saldo_total()
+    posicao = db.get_posicao_consolidada()
+    saldo_inicial = posicao["total"]
 
     dados_c1 = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta_c1, inc_media_c1, erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial, inc_fci=inc_fci_c1, inc_fcf=inc_fcf_c1)
     dados_c2 = db.fc_diario(str(dt_ini), str(dt_fim), inc_alta_c2, inc_media_c2, erp_corte_status=cfg_corte, saldo_inicial=saldo_inicial, inc_fci=inc_fci_c2, inc_fcf=inc_fcf_c2)
@@ -69,7 +70,10 @@ def render():
             "Cenário 1": df_c1.set_index("Mês")["Saldo Acumulado"],
             "Cenário 2": df_c2.set_index("Mês")["Saldo Acumulado"],
         }).fillna(0)
-        st.caption(f"Saldo inicial (bancos): R$ {saldo_inicial:,.2f}")
+        st.caption(
+            f"Posição consolidada: R$ {saldo_inicial:,.2f} "
+            f"(bancos R$ {posicao['total_bancos']:,.2f} + câmbios R$ {posicao['total_cambios_brl']:,.2f})"
+        )
         st.line_chart(comp, height=350)
 
 

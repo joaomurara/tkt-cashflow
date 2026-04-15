@@ -5,9 +5,10 @@ db.py — Camada de acesso ao banco de dados PostgreSQL (Supabase) para o TKT Ca
 import json
 import os
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 import psycopg2
+import requests
 import psycopg2.extras
 import streamlit as st
 
@@ -675,6 +676,76 @@ def get_saldo_total() -> float:
     """Retorna a soma de todos os saldos bancários mais recentes cadastrados."""
     saldos = listar_saldos_recentes()
     return sum(r["saldo"] or 0 for r in saldos)
+
+
+def _ptax_venda(moeda: str, ref_date=None) -> float | None:
+    """Busca PTAX de venda do BCB. Tenta até 5 dias anteriores (fins de semana/feriados)."""
+    if ref_date is None:
+        ref_date = date.today()
+    for delta in range(5):
+        d = ref_date - timedelta(days=delta)
+        d_str = d.strftime("%m-%d-%Y")
+        try:
+            if moeda == "USD":
+                url = (
+                    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+                    f"CotacaoDolarDia(dataCotacao=@dataCotacao)?"
+                    f"@dataCotacao='{d_str}'&$top=1&$format=json&$select=cotacaoVenda"
+                )
+            else:
+                url = (
+                    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+                    f"CotacaoMoedaDia(moeda=@moeda,dataCotacao=@dataCotacao)?"
+                    f"@moeda='{moeda}'&@dataCotacao='{d_str}'&$top=1&$format=json&$select=cotacaoVenda"
+                )
+            val = requests.get(url, timeout=5).json().get("value", [])
+            if val:
+                return float(val[0]["cotacaoVenda"])
+        except Exception:
+            continue
+    return None
+
+
+def get_posicao_consolidada() -> dict:
+    """
+    Retorna a posição consolidada de caixa:
+      - total_bancos:     soma dos saldos bancários mais recentes
+      - total_cambios_brl: câmbios disponíveis convertidos em BRL pela PTAX do dia
+      - total:            total_bancos + total_cambios_brl
+      - ptax_map:         dict moeda → taxa usada (para reúso, evita chamadas duplas)
+
+    Usa cache de sessão Streamlit para não repetir chamadas à API do BCB na mesma
+    renderização. O cache é invalidado a cada nova sessão ou rerun.
+    """
+    cache_key = "_db_posicao_consolidada"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    total_bancos = get_saldo_total()
+
+    cambios_disp = listar_cambios(status="DISPONIVEL")
+    moedas = {c["moeda"] for c in cambios_disp}
+
+    ptax_map: dict[str, float] = {}
+    for moeda in moedas:
+        taxa = _ptax_venda(moeda)
+        if taxa:
+            ptax_map[moeda] = taxa
+
+    total_cambios_brl = sum(
+        (c["valor_me"] or 0) * ptax_map[c["moeda"]]
+        for c in cambios_disp
+        if c["moeda"] in ptax_map
+    )
+
+    resultado = {
+        "total_bancos":      total_bancos,
+        "total_cambios_brl": total_cambios_brl,
+        "total":             total_bancos + total_cambios_brl,
+        "ptax_map":          ptax_map,
+    }
+    st.session_state[cache_key] = resultado
+    return resultado
 
 
 # ─── FC DIÁRIO (VIEW CONSOLIDADA) ────────────────────────────────────────────

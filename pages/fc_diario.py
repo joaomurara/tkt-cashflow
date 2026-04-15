@@ -51,7 +51,8 @@ def render():
         " — altere em **⚙️ Período de análise** na barra lateral."
     )
 
-    saldo_inicial = db.get_saldo_total()
+    posicao = db.get_posicao_consolidada()
+    saldo_inicial = posicao["total"]
 
     dados = db.fc_diario(
         dt_ini=str(dt_ini), dt_fim=str(dt_fim),
@@ -72,7 +73,12 @@ def render():
         total_cred  = sum(r["valor_final"] for r in dados if (r["valor_final"] or 0) > 0)
         total_deb   = sum(r["valor_final"] for r in dados if (r["valor_final"] or 0) < 0)
         saldo_final = dados[-1]["saldo_acumulado"] if dados else saldo_inicial
-        col_m1.metric("Saldo Inicial (Bancos)", f"R$ {saldo_inicial:,.2f}")
+        col_m1.metric(
+            "Posição Consolidada",
+            f"R$ {saldo_inicial:,.2f}",
+            delta=f"bancos R$ {posicao['total_bancos']:,.2f} + câmbios R$ {posicao['total_cambios_brl']:,.2f}",
+            delta_color="off",
+        )
         col_m2.metric("Entradas", f"R$ {total_cred:,.2f}")
         col_m3.metric("Saídas",   f"R$ {abs(total_deb):,.2f}")
         col_m4.metric("Saldo do Período", f"R$ {total_cred + total_deb:,.2f}")
@@ -119,7 +125,7 @@ def render():
         )
         df_saldo.columns = [agrupar if agrupar != "Nenhum" else "Data", "Saldo Acumulado"]
         st.markdown(f"**Saldo acumulado por {agrupar if agrupar != 'Nenhum' else 'dia'}** "
-                    f"*(início: R$ {saldo_inicial:,.2f})*")
+                    f"*(posição consolidada: R$ {saldo_inicial:,.2f})*")
         st.line_chart(df_saldo.set_index(df_saldo.columns[0]), height=250)
 
     st.markdown("---")
