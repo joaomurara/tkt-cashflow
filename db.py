@@ -439,6 +439,12 @@ def mover_fup_para_provisoes(deal_id: str, remover_do_fup: bool = True) -> int:
         return 0
     with get_conn() as conn:
         cur = conn.cursor()
+        # Remove provisões já existentes desse deal para evitar UniqueViolation
+        # (caso o usuário mova o mesmo negócio mais de uma vez, os dados são atualizados)
+        cur.execute(
+            "DELETE FROM provisoes WHERE codigo = %s",
+            (str(deal_id),)
+        )
         for l in linhas:
             prov = {
                 "operacao":      l.get("operacao", ""),
