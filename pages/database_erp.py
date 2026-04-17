@@ -35,8 +35,8 @@ def render():
 
     can_edit = st.session_state.get("can_edit", True)
 
-    tab_import, tab_dados, tab_atraso, tab_estatisticas = st.tabs([
-        "📥 Importar CSV", "📋 Dados Atuais", "🔴 Em Atraso", "📊 Estatísticas"
+    tab_import, tab_dados, tab_atraso, tab_ignorar, tab_estatisticas = st.tabs([
+        "📥 Importar CSV", "📋 Dados Atuais", "🔴 Em Atraso", "🚫 Ignorar no FC", "📊 Estatísticas"
     ])
 
     # ─── ABA IMPORTAR ──────────────────────────────────────────────────────
@@ -376,6 +376,76 @@ def render():
                 st.success(f"✅ {marcados} lançamento(s) marcado(s) como Em Atraso.")
                 st.rerun()
 
+    # ─── ABA IGNORAR NO FC ────────────────────────────────────────────────
+    with tab_ignorar:
+        st.subheader("🚫 Lançamentos excluídos do Fluxo de Caixa")
+        st.markdown(
+            "Marque os lançamentos que **não devem ser considerados** no cálculo do FC. "
+            "Útil para negócios cancelados, duplicidades ou valores que serão renegociados."
+        )
+
+        todos_ignorar = db.listar_erp()
+        if not todos_ignorar:
+            st.info("Nenhum dado disponível.")
+        else:
+            busca_ig = st.text_input("🔍 Buscar", placeholder="Razão social, descrição...", key="ig_busca")
+            mostrar_apenas_ignorados = st.checkbox("Mostrar apenas os já excluídos", key="ig_apenas_flag")
+
+            df_ig = pd.DataFrame(todos_ignorar)
+            df_ig["ignorar_fc"] = df_ig["ignorar_fc"].fillna(False).astype(bool) if "ignorar_fc" in df_ig.columns else False
+
+            if busca_ig:
+                mask = (
+                    df_ig["razao_social"].str.contains(busca_ig, case=False, na=False) |
+                    df_ig["descricao"].str.contains(busca_ig, case=False, na=False)
+                )
+                df_ig = df_ig[mask]
+            if mostrar_apenas_ignorados:
+                df_ig = df_ig[df_ig["ignorar_fc"] == True]
+
+            n_ignorados = df_ig["ignorar_fc"].sum()
+            total_ignorado = df_ig[df_ig["ignorar_fc"] == True]["valor_final"].sum() if n_ignorados else 0
+            st.info(f"{n_ignorados} lançamento(s) marcado(s) como ignorado · Valor excluído do FC: **R$ {total_ignorado:,.2f}**")
+
+            df_ig_edit = df_ig[["id", "ignorar_fc", "operacao", "razao_social",
+                                 "descricao", "vencimento", "valor_final", "status"]].copy()
+            df_ig_edit = df_ig_edit.rename(columns={
+                "ignorar_fc":   "Ignorar FC?",
+                "operacao":     "Op.",
+                "razao_social": "Razão Social",
+                "descricao":    "Descrição",
+                "vencimento":   "Vencimento",
+                "valor_final":  "Valor",
+                "status":       "Status",
+            })
+
+            _disabled_ig = ["id", "Op.", "Razão Social", "Descrição", "Vencimento", "Valor", "Status"]
+            if not can_edit:
+                _disabled_ig += ["Ignorar FC?"]
+
+            edited_ig = st.data_editor(
+                df_ig_edit,
+                use_container_width=True,
+                hide_index=True,
+                disabled=_disabled_ig,
+                column_config={
+                    "id":          st.column_config.NumberColumn("ID", width="small"),
+                    "Ignorar FC?": st.column_config.CheckboxColumn(
+                                       "Ignorar FC?", width="small",
+                                       help="Quando marcado, este lançamento não entra em nenhum cálculo de FC"),
+                    "Valor":       st.column_config.NumberColumn("Valor", format="R$ %.2f"),
+                },
+                key="ig_editor",
+            )
+
+            if can_edit and st.button("💾 Salvar flags", type="primary", key="ig_salvar"):
+                rows_ig = [{"id": row["id"], "ignorar_fc": bool(row["Ignorar FC?"])}
+                           for _, row in edited_ig.iterrows()]
+                db.atualizar_erp_ignorar_fc(rows_ig)
+                marcados = sum(1 for r in rows_ig if r["ignorar_fc"])
+                st.success(f"✅ {marcados} lançamento(s) marcado(s) para ignorar no FC.")
+                st.rerun()
+
     # ─── ABA ESTATÍSTICAS ─────────────────────────────────────────────────
     with tab_estatisticas:
         st.subheader("Distribuição dos lançamentos")
@@ -410,6 +480,60 @@ def render():
         mensal = df_all.groupby("mes")["valor_final"].sum().reset_index()
         mensal.columns = ["Mês", "Saldo"]
         st.bar_chart(mensal.set_index("Mês"))
+
+        st.markdown("---")
+
+        # ── Lançamentos ignorados no FC ────────────────────────────────────
+        st.subheader("🚫 Excluídos do Fluxo de Caixa (ignorar_fc)")
+        if "ignorar_fc" in df_all.columns:
+            df_ign = df_all[df_all["ignorar_fc"] == True].copy()
+        else:
+            df_ign = pd.DataFrame()
+
+        if df_ign.empty:
+            st.info("Nenhum lançamento marcado para ignorar no FC.")
+        else:
+            tot_ign_cred = df_ign[df_ign["valor_final"] > 0]["valor_final"].sum()
+            tot_ign_deb  = df_ign[df_ign["valor_final"] < 0]["valor_final"].sum()
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Qtd. ignorados", f"{len(df_ign)}")
+            c2.metric("Entradas excluídas", f"R$ {tot_ign_cred:,.2f}")
+            c3.metric("Saídas excluídas",   f"R$ {abs(tot_ign_deb):,.2f}")
+
+            df_ign_show = df_ign[["razao_social", "descricao", "vencimento", "valor_final", "status"]].copy()
+            df_ign_show["valor_final"] = df_ign_show["valor_final"].apply(
+                lambda x: f"🟢 R$ {x:,.2f}" if x > 0 else f"🔴 R$ {abs(x):,.2f}"
+            )
+            df_ign_show.columns = ["Razão Social", "Descrição", "Vencimento", "Valor", "Status"]
+            st.dataframe(df_ign_show, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # ── Lançamentos em atraso ──────────────────────────────────────────
+        st.subheader("🔴 Em Atraso (incluir_atraso = SIM)")
+        if "incluir_atraso" in df_all.columns:
+            df_atr = df_all[df_all["incluir_atraso"] == True].copy()
+        else:
+            df_atr = pd.DataFrame()
+
+        if df_atr.empty:
+            st.info("Nenhum lançamento marcado como Em Atraso.")
+        else:
+            tot_atr_cred = df_atr[df_atr["valor_final"] > 0]["valor_final"].sum()
+            tot_atr_deb  = df_atr[df_atr["valor_final"] < 0]["valor_final"].sum()
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Qtd. em atraso", f"{len(df_atr)}")
+            c2.metric("Entradas em atraso", f"R$ {tot_atr_cred:,.2f}")
+            c3.metric("Saídas em atraso",   f"R$ {abs(tot_atr_deb):,.2f}")
+
+            df_atr_show = df_atr[["razao_social", "descricao", "vencimento",
+                                   "data_previsao", "valor_final", "status"]].copy() \
+                if "data_previsao" in df_atr.columns \
+                else df_atr[["razao_social", "descricao", "vencimento", "valor_final", "status"]].copy()
+            df_atr_show["valor_final"] = df_atr_show["valor_final"].apply(
+                lambda x: f"🟢 R$ {x:,.2f}" if x > 0 else f"🔴 R$ {abs(x):,.2f}"
+            )
+            st.dataframe(df_atr_show, use_container_width=True, hide_index=True)
 
 
 # ─── HELPER: MAPEAR LINHA ────────────────────────────────────────────────────

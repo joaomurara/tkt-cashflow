@@ -235,6 +235,10 @@ def _migrar_db(cur):
     cur.execute(
         "ALTER TABLE database_erp ADD COLUMN IF NOT EXISTS data_previsao TEXT DEFAULT NULL"
     )
+    # Flag para excluir lançamento do cálculo do fluxo de caixa
+    cur.execute(
+        "ALTER TABLE database_erp ADD COLUMN IF NOT EXISTS ignorar_fc BOOLEAN DEFAULT FALSE"
+    )
     # Snapshot do lançamento original para permitir reversão do câmbio
     cur.execute(
         "ALTER TABLE cambios_disponiveis ADD COLUMN IF NOT EXISTS origem_snapshot TEXT DEFAULT NULL"
@@ -355,6 +359,20 @@ def atualizar_erp_atraso(rows: list[dict]):
                     r.get("data_previsao") or None,
                     int(r["id"]),
                 )
+            )
+
+
+def atualizar_erp_ignorar_fc(rows: list[dict]):
+    """
+    Atualiza ignorar_fc para cada item.
+    rows: [{"id": int, "ignorar_fc": bool}, ...]
+    """
+    with get_conn() as conn:
+        cur = conn.cursor()
+        for r in rows:
+            cur.execute(
+                "UPDATE database_erp SET ignorar_fc = %s WHERE id = %s",
+                (bool(r.get("ignorar_fc", False)), int(r["id"]))
             )
 
 
@@ -887,6 +905,7 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
             WHERE probabilidade = ANY(%s)
               {cond_fim_erp}
               AND COALESCE(status, 'PENDENTE') NOT IN ('PAGO', 'RECEBIDO')
+              AND COALESCE(ignorar_fc, FALSE) = FALSE
               AND (
                 vencimento >= %s
                 OR COALESCE(incluir_atraso, FALSE)
@@ -901,6 +920,7 @@ def fc_diario(dt_ini=None, dt_fim=None, incluir_alta=True, incluir_media=True,
             FROM database_erp
             WHERE probabilidade = ANY(%s)
               AND COALESCE(status, 'PENDENTE') NOT IN ('PAGO', 'RECEBIDO')
+              AND COALESCE(ignorar_fc, FALSE) = FALSE
               {cond_dt}
         """
         params_erp = [filtros_prob] + params_dt
