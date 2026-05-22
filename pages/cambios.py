@@ -144,7 +144,7 @@ def render():
                     )
                 with col_f3:
                     ptax_fech = _ptax_cached(escolha["moeda"], data_fech)
-                    ptax_display = ptax_fech or 0.0
+                    ptax_display = float(ptax_fech) if ptax_fech else 0.0001
                     ptax_ef = st.number_input(
                         f"PTAX do dia ({escolha['moeda']})",
                         value=ptax_display,
@@ -152,6 +152,8 @@ def render():
                         key="fech_ptax",
                         help="Preenchido automaticamente via BCB. Ajuste se necessário."
                     )
+                    if not ptax_fech:
+                        st.caption("⚠️ PTAX indisponível para a data — informe manualmente.")
 
                 if taxa_ef > 0 and ptax_ef > 0:
                     spread     = taxa_ef - ptax_ef
