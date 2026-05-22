@@ -245,6 +245,42 @@ with st.sidebar:
         st.session_state["cfg_corte_status"]  = corte_status
         # cfg_atraso_dt_ini é gerenciado automaticamente pelo checkbox (key="cfg_atraso_dt_ini")
 
+    # ─── PTAX MANUAL ─────────────────────────────────────────────────────────
+    with st.expander("💱 PTAX Manual", expanded=False):
+        st.caption("Use quando a API do BCB estiver indisponível. Os valores aqui sobrepõem a cotação automática em todos os módulos.")
+
+        MOEDAS_PTAX = ["USD", "EUR", "ARS", "GBP"]
+        ptax_manual = {}
+        for moeda in MOEDAS_PTAX:
+            cfg_key = f"ptax_manual_{moeda}"
+            salvo_str = db.get_cfg(cfg_key)
+            try:
+                salvo_val = float(salvo_str) if salvo_str else 0.0
+            except Exception:
+                salvo_val = 0.0
+            ptax_manual[moeda] = st.number_input(
+                f"{moeda} / BRL",
+                value=salvo_val,
+                min_value=0.0, step=0.0001, format="%.4f",
+                key=f"sidebar_ptax_{moeda}",
+                help=f"0 = usar BCB automaticamente"
+            )
+
+        if auth.can_edit():
+            if st.button("💾 Salvar PTAX", key="btn_salvar_ptax"):
+                for moeda, val in ptax_manual.items():
+                    db.set_cfg(f"ptax_manual_{moeda}", str(val) if val > 0 else "0")
+                # Limpa cache de posição consolidada para forçar recálculo
+                for k in list(st.session_state.keys()):
+                    if "_ptax_" in k or "_db_posicao" in k:
+                        del st.session_state[k]
+                st.success("PTAX manual salvo!")
+                st.rerun()
+
+        # Expõe no session_state para todos os módulos
+        for moeda, val in ptax_manual.items():
+            st.session_state[f"ptax_manual_{moeda}"] = val if val > 0 else None
+
     st.markdown("---")
     st.caption("Tecnotok © 2026")
 

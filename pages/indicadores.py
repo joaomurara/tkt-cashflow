@@ -42,6 +42,10 @@ def _buscar_ptax(moeda: str = "USD", ref_date: date | None = None) -> float | No
 
 
 def _ptax_cached(moeda: str) -> float | None:
+    # Override manual tem prioridade
+    override = st.session_state.get(f"ptax_manual_{moeda}")
+    if override and float(override) > 0:
+        return float(override)
     key = f"_ind_ptax_{moeda}"
     if key not in st.session_state:
         st.session_state[key] = _buscar_ptax(moeda)

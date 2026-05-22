@@ -708,7 +708,22 @@ def get_saldo_total() -> float:
 
 
 def _ptax_venda(moeda: str, ref_date=None) -> float | None:
-    """Busca PTAX de venda do BCB. Tenta até 5 dias anteriores (fins de semana/feriados)."""
+    """Busca PTAX de venda do BCB. Checa override manual antes de chamar a API."""
+    # ── Override manual (sidebar) ────────────────────────────────────────────
+    try:
+        override = st.session_state.get(f"ptax_manual_{moeda}")
+        if override and float(override) > 0:
+            return float(override)
+    except Exception:
+        pass
+    # ── Fallback: DB config (persistido) ────────────────────────────────────
+    try:
+        cfg_val = get_cfg(f"ptax_manual_{moeda}")
+        if cfg_val and float(cfg_val) > 0:
+            return float(cfg_val)
+    except Exception:
+        pass
+    # ── API BCB ──────────────────────────────────────────────────────────────
     if ref_date is None:
         ref_date = date.today()
     for delta in range(5):
